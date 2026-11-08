@@ -9,6 +9,7 @@ node_modules/
 dist/
 build/
 coverage/
+output/playwright/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
@@ -21,6 +22,9 @@ graphify-out/
 data/media/
 data/models/
 data/dictionaries/
+!data/dictionaries/
+data/dictionaries/*
+!data/dictionaries/README.md
 data/jobs/
 *.part
 *.tmp

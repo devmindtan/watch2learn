@@ -22,7 +22,7 @@ The exact package versions will be pinned when the first vertical slice starts.
 
 | Area | Default | Why |
 | --- | --- | --- |
-| Web | React + Vite + TypeScript | Small client bundle, no hosting lock-in |
+| Web | Browser-native HTML/CSS/JS initially | No frontend runtime dependency for the first vertical slice |
 | API/jobs | FastAPI + Python | Strong media/NLP ecosystem and typed contracts |
 | Metadata | SQLite | Zero-cost, transactional, easy local backup |
 | Media | FFmpeg/ffprobe | Mature local extraction and probing |
@@ -30,6 +30,10 @@ The exact package versions will be pinned when the first vertical slice starts.
 | ASR fallback | faster-whisper | Local CPU/GPU transcription; word timestamps |
 | Mandarin adapter | Jieba + pypinyin + CC-CEDICT | Offline segmentation, readings, meanings |
 | Browser tests | Playwright | Critical playback/transcript flow validation |
+
+The first vertical slice deliberately keeps video as a browser object URL and
+sends only subtitle text to the local API. A framework becomes justified when UI
+state or reuse exceeds what the small native client can keep clear.
 
 Do not add Redis, Kafka, Kubernetes, a vector database, microservices, or a cloud
 object store until measured requirements make the local design insufficient.

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Học từ vựng tiếng Trung trong đúng ngữ cảnh video." />
+    <title>Watch2Learn · Học tiếng Trung qua video</title>
+    <link rel="icon" href="/assets/favicon.svg" />
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Watch2Learn home">
+        <span class="brand-mark" aria-hidden="true">文</span>
+        <span>Watch2Learn</span>
+      </a>
+      <p>Học từ trong câu. Nhớ từ trong khoảnh khắc.</p>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="intro-title">
+        <div>
+          <p class="eyebrow">Mandarin · local-first</p>
+          <h1 id="intro-title">Biến video bạn đang xem thành bài học từ vựng.</h1>
+          <p class="intro-copy">
+            Video không rời khỏi trình duyệt. Chọn video và phụ đề SRT/VTT tiếng Trung,
+            rồi khám phá mỗi từ cùng câu trước, câu hiện tại và câu tiếp theo.
+          </p>
+        </div>
+        <form id="lesson-form" class="import-card">
+          <label>
+            <span>Video trên máy</span>
+            <input id="video-file" type="file" accept="video/*,audio/*" />
+          </label>
+          <label>
+            <span>Phụ đề tiếng Trung</span>
+            <input id="subtitle-file" type="file" accept=".srt,.vtt,text/vtt" required />
+          </label>
+          <button type="submit">Tạo bài học</button>
+          <p id="form-note" class="form-note">Hỗ trợ SRT và WebVTT. Chưa cần tài khoản hay API key.</p>
+        </form>
+      </section>
+
+      <section id="workspace" class="workspace" hidden aria-live="polite">
+        <div class="learning-column">
+          <div class="player-shell">
+            <video id="video" controls preload="metadata"></video>
+            <div id="audio-placeholder" class="audio-placeholder" hidden>
+              Đã nạp phụ đề. Chọn video để phát đúng khoảnh khắc.
+            </div>
+          </div>
+          <div class="transcript-heading">
+            <div>
+              <p class="eyebrow">Transcript</p>
+              <h2>Nghe và đọc trong ngữ cảnh</h2>
+            </div>
+            <label class="switch-label">
+              <input id="pinyin-toggle" type="checkbox" checked />
+              Hiện pinyin
+            </label>
+          </div>
+          <ol id="transcript" class="transcript"></ol>
+        </div>
+
+        <aside class="vocabulary-panel" aria-labelledby="vocabulary-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Từ trong video</p>
+              <h2 id="vocabulary-title">Từ vựng</h2>
+            </div>
+            <span id="word-count" class="count"></span>
+          </div>
+          <div id="dictionary-notice" class="notice" hidden></div>
+          <div id="word-detail" class="word-detail empty-detail">
+            Chọn một từ trong transcript hoặc danh sách bên dưới.
+          </div>
+          <ol id="vocabulary-list" class="vocabulary-list"></ol>
+        </aside>
+      </section>
+    </main>
+
+    <template id="cue-template">
+      <li class="cue-row">
+        <button class="cue-time" type="button"></button>
+        <p class="cue-text" lang="zh"></p>
+      </li>
+    </template>
+    <script type="module" src="/assets/app.js"></script>
+  </body>
+</html>

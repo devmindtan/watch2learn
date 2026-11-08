@@ -12,8 +12,10 @@ transitive licenses before pinning a production version.
 | SYSTRAN/faster-whisper | local ASR | MIT; model weights must be checked separately | Preferred ASR adapter |
 | fxsjy/jieba | Mandarin segmentation | MIT | Baseline segmenter with correction support |
 | pypinyin | readings | MIT | Generate pinyin; retain dictionary readings |
-| CC-CEDICT | offline Chinese-English meanings | CC BY-SA; data obligations apply | Keep as separately attributed data asset |
+| CC-CEDICT | offline Chinese-English meanings | CC BY-SA 4.0; data obligations apply | Manual local install only; MDBG prohibits scripted access |
 | Playwright | browser verification | Apache-2.0 | Critical flows only |
+| FastAPI | local HTTP API | MIT | Serve the local lesson API and static client |
+| pypinyin | Mandarin readings | MIT | Context-aware phrase readings with generated fallback |
 | Graphify (`graphifyy`) | codebase graph | Apache-2.0; local code graph needs no cloud/API | Use local code-only features for broad/structural work; never Graphify Cloud/trials |
 | Ponytail | minimal-code discipline | MIT | Use during implementation/review |
 
@@ -49,6 +51,8 @@ repository unless its exact license and attribution requirements are recorded.
 - yt-dlp: <https://github.com/yt-dlp/yt-dlp>
 - Jieba: <https://github.com/fxsjy/jieba>
 - CC-CEDICT: <https://cc-cedict.org/>
+- FastAPI: <https://github.com/fastapi/fastapi>
+- pypinyin: <https://github.com/mozillazg/python-pinyin>
 - YT Mandarin Subs: <https://github.com/cmyui/yt-mandarin-subs>
 - Miteiru: <https://github.com/hockyy/miteiru>
 - Verso: <https://www.vilingua.com/>

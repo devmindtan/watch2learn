@@ -31,3 +31,23 @@ a defect that escaped a completed check, or a manual task repeated at least twic
 - Reusable rule: after one sandbox timeout with no child process/output, stop the
   orphaned session and rerun the exact scoped pnpm command with approval.
 - Verification: capture the real exit status and output of `pnpm quality`.
+
+## 2026-11-08 — synchronous TestClient requests stalled in the sandbox
+
+- Evidence: the API suite timed out twice at its first `fastapi.testclient`
+  request, while parser and lesson tests completed normally.
+- Root cause: TestClient's synchronous portal/thread path did not complete in the
+  restricted runner; the application did not require that thread boundary.
+- Reusable rule: test ASGI endpoints with `httpx.AsyncClient` and `ASGITransport`
+  when a real synchronous client thread is not part of the behavior under test.
+- Verification: the API request/validation tests finish inside the sandbox and the
+  same app is exercised over real HTTP during Playwright QA.
+
+## 2026-11-08 — generated patches repeatedly left blank lines at EOF
+
+- Evidence: `git diff --check` rejected both attempted commits because several new
+  text files ended with an extra blank line.
+- Root cause: patch-created files were not normalized before the first quality run.
+- Reusable rule: make whitespace validation part of `pnpm quality`, not only the
+  final commit command; keep the cached-diff check immediately before commit too.
+- Verification: `pnpm whitespace` and `git diff --cached --check` both pass.

@@ -5,9 +5,14 @@
   "description": "Local-first vocabulary learning from permitted video content",
   "packageManager": "pnpm@10.16.1",
   "scripts": {
+    "dev": "uv run uvicorn watch2learn.app:app --app-dir apps/api --reload --port 8000",
     "doctor": "bash scripts/doctor.sh",
+    "format:check": "uv run ruff format --check apps/api",
+    "lint": "uv run ruff check apps/api",
     "policy:free": "bash scripts/check-free-policy.sh",
-    "quality": "pnpm policy:free && bash scripts/doctor.sh --ci"
+    "test": "uv run pytest",
+    "whitespace": "git diff --check",
+    "quality": "pnpm whitespace && pnpm policy:free && pnpm lint && pnpm format:check && pnpm test && bash scripts/doctor.sh --ci"
   },
   "engines": {
     "node": ">=22",

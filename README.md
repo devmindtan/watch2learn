@@ -23,16 +23,31 @@ languages can be added later.
 
 ## Repository status
 
-This first milestone prepares the repository, agent skills, architecture, quality
-rules, and free/open-source choices. Application code is intentionally not
-generated until the first vertical slice is specified.
+The first vertical slice is working: a local web UI accepts Mandarin SRT/WebVTT,
+extracts timestamped vocabulary with Jieba and pypinyin, preserves neighboring cue
+context, and uses CC-CEDICT when a local dictionary file is present. Video playback
+uses a browser object URL, so the media file never leaves the browser.
 
 ## Start here
 
 ```bash
 bash scripts/bootstrap-media-tools.sh # only when ffmpeg is not already installed
+uv sync
+pnpm dev
+```
+
+Open <http://127.0.0.1:8000>, choose a local video and a Mandarin SRT/VTT file.
+The video stays in the browser; only subtitle text is sent to the local API.
+
+For offline English meanings, manually place CC-CEDICT at
+`data/dictionaries/cedict_ts.u8`; see [the dictionary instructions](data/dictionaries/README.md).
+
+Run checks with:
+
+```bash
 bash scripts/doctor.sh
 pnpm policy:free
+pnpm quality
 ```
 
 Read [the architecture](docs/architecture.md), [the open-source evaluation](docs/open-source-evaluation.md),
