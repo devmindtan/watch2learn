@@ -161,7 +161,8 @@ def test_old_lessons_get_context_readings_without_losing_text_or_translation(mon
 
     saved = app_module.jobs.get(job["id"])["result"]
     cue = saved["cues"][0]
-    assert cue["text"] == old_cue["text"] and cue["start_ms"] == 6220
+    assert cue["text"] == "上一集,我捡到了一个手机" and cue["start_ms"] == 6220
+    assert cue["text_original"] == old_cue["text"]
     assert cue["translation_vi"] == old_cue["translation_vi"]
     segment = next(item for item in cue["segments"] if item["text"] == "上")
     assert segment["pinyin"] == "shàng"

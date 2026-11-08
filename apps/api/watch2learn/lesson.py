@@ -5,6 +5,7 @@ from collections import Counter, defaultdict
 from hashlib import sha256
 
 import jieba
+from opencc import OpenCC
 from pypinyin import Style, lazy_pinyin, pinyin
 from pypinyin.contrib.tone_convert import to_tone
 
@@ -14,7 +15,17 @@ from .subtitles import Cue
 CJK_RE = re.compile(r"[㐀-䶿一-鿿豈-﫿]")
 TONE_RE = re.compile(r"[1-5]")
 MAX_ALTERNATIVE_READINGS = 4
-ANALYSIS_VERSION = "zh-v2"
+ANALYSIS_VERSION = "zh-v3"
+_TO_SIMPLIFIED = OpenCC("t2s")
+
+
+def to_simplified(text: str) -> str:
+    """Learner-facing Chinese is simplified; the original stays in `text_original`."""
+    return _TO_SIMPLIFIED.convert(text)
+
+
+def simplified_cues(cues: list[Cue]) -> list[Cue]:
+    return [Cue(cue.id, cue.start_ms, cue.end_ms, to_simplified(cue.text)) for cue in cues]
 
 
 def vocabulary_id(word: str) -> str:
@@ -155,6 +166,8 @@ def build_lesson(
     surface_forms: dict[str, set[str]] = defaultdict(set)
     cue_rows = []
 
+    originals = {cue.id: cue.text for cue in cues}
+    cues = simplified_cues(cues)
     for index, cue in enumerate(cues):
         before_text = cues[index - 1].text if index else None
         after_text = cues[index + 1].text if index + 1 < len(cues) else None
@@ -165,6 +178,7 @@ def build_lesson(
                 "start_ms": cue.start_ms,
                 "end_ms": cue.end_ms,
                 "text": cue.text,
+                "text_original": originals[cue.id] if originals[cue.id] != cue.text else None,
                 **(translations[index] if translations else {"translation_vi": None}),
                 "segments": segments,
             }

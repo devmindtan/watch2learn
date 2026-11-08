@@ -17,6 +17,7 @@ transitive licenses before pinning a production version.
 | pypinyin | readings | MIT | Generate pinyin; retain dictionary readings |
 | CC-CEDICT | offline Chinese-English meanings | CC BY-SA 4.0; attribution/share-alike apply | Pinned checksummed snapshot from an unmodified GitHub redistribution mirror; never script MDBG |
 | CVDICT (`ph0ngp/CVDICT`) | offline Chinese-Vietnamese meanings | CC BY-SA 4.0; derived from CC-CEDICT; meanings were machine-translated then manually reviewed by its author | Pinned commit + SHA-256; labelled as CVDICT in the UI; English CC-CEDICT kept alongside |
+| OpenCC (`opencc` 1.4.x, BYVoid) | traditional → simplified conversion | Apache-2.0; offline phrase tables | Learner-facing text is simplified; original cue text kept in `text_original` |
 | CTranslate2 + SentencePiece | local sentence-translation runtime | MIT / Apache-2.0 | CPU int8 inference; CTranslate2 already ships with faster-whisper |
 | Helsinki-NLP/opus-mt-zh-vi (CTranslate2 int8 conversion `manancode/opus-mt-zh-vi-ctranslate2-android`) | offline zh→vi sentence translation | Apache-2.0; about 83 MB | Explicit `pnpm setup:translation`; pinned revision + per-file SHA-256; optional — lessons still work without it |
 | Playwright | browser verification | Apache-2.0 | Critical flows only |

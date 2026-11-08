@@ -36,7 +36,8 @@ def test_traditional_surface_maps_to_simplified_lexeme():
     lesson = build_lesson([Cue("cue-1", 0, 1000, "我在學習。")], dictionary)
     learning = next(word for word in lesson["vocabulary"] if word["word"] == "学习")
     assert learning["traditional"] == "學習"
-    assert learning["surface_forms"] == ["學習"]
+    assert learning["surface_forms"] == ["学习"]
+    assert lesson["cues"][0]["text_original"] == "我在學習。"
 
 
 def test_vietnamese_meanings_follow_english_reading_and_cue_translations_align():
@@ -81,3 +82,16 @@ def test_polyphonic_word_uses_sentence_reading_and_keeps_alternatives():
     assert word["alternatives"][0]["definitions_vi"] == ["thay đổi"]
     segment = next(seg for seg in lesson["cues"][0]["segments"] if seg["text"] == "更")
     assert segment["pinyin"] == "gèng"
+
+
+def test_traditional_cues_are_learned_in_simplified_and_keep_the_original():
+    dictionary = Cedict.from_text(
+        "後來 后来 [hou4 lai2] /afterwards/\n看見 看见 [kan4 jian4] /to see/"
+    )
+    lesson = build_lesson([Cue("cue-1", 0, 1000, "後來我看見她")], dictionary)
+    cue = lesson["cues"][0]
+    assert cue["text"] == "后来我看见她"
+    assert cue["text_original"] == "後來我看見她"
+    words = {item["word"] for item in lesson["vocabulary"]}
+    assert {"后来", "看见"} <= words
+    assert lesson["vocabulary"][0]["occurrences"][0]["cue_text"] == "后来我看见她"

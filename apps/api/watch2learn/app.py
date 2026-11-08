@@ -21,7 +21,12 @@ from pydantic import BaseModel, Field
 from . import jobs, storage, translation, youtube
 from .asr import model_ready, transcribe_mandarin
 from .dictionary import load_cedict, load_vietnamese
-from .lesson import ANALYSIS_VERSION, add_vietnamese_definitions, build_lesson
+from .lesson import (
+    ANALYSIS_VERSION,
+    add_vietnamese_definitions,
+    build_lesson,
+    simplified_cues,
+)
 from .media import (
     extract_asr_audio,
     extract_embedded_subtitles,
@@ -99,7 +104,7 @@ def translate_cues(cues: list[Cue]) -> tuple[list[dict] | None, dict]:
 
 def analyze_cues(cues: list[Cue], report: Report = no_report) -> dict:
     report("translating", 88)
-    translations, translation_details = translate_cues(cues)
+    translations, translation_details = translate_cues(simplified_cues(cues))
     report("analyzing-vocabulary", 94)
     return build_lesson(cues, load_cedict(), load_vietnamese(), translations, translation_details)
 
@@ -546,7 +551,10 @@ def ensure_current_analysis(lesson_id: str) -> dict | None:
         if lesson.get("analysis", {}).get("version") == ANALYSIS_VERSION:
             return lesson
         stored = lesson["cues"]
-        cues = [Cue(cue["id"], cue["start_ms"], cue["end_ms"], cue["text"]) for cue in stored]
+        cues = [
+            Cue(cue["id"], cue["start_ms"], cue["end_ms"], cue.get("text_original") or cue["text"])
+            for cue in stored
+        ]
         rows = [{key: cue.get(key) for key in TRANSLATION_FIELDS} for cue in stored]
         rebuilt = build_lesson(
             cues, load_cedict(), load_vietnamese(), rows, lesson.get("translation")
