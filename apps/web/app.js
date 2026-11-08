@@ -180,33 +180,40 @@ function renderLesson() {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  const mediaFile = videoInput.files[0];
   const subtitleFile = subtitleInput.files[0];
-  if (!subtitleFile) return;
+  if (!mediaFile) return;
   form.querySelector("button").disabled = true;
-  formNote.textContent = "Đang phân tích phụ đề trên máy của bạn…";
+  if (videoUrl) URL.revokeObjectURL(videoUrl);
+  videoUrl = URL.createObjectURL(mediaFile);
+  video.src = videoUrl;
+  video.hidden = false;
+  placeholder.hidden = true;
+  formNote.textContent = subtitleFile
+    ? "Đang ghép phụ đề với video trên máy của bạn…"
+    : "Đang tách âm thanh và nhận dạng tiếng Trung trên máy. Video dài có thể mất vài phút…";
   try {
-    const response = await fetch("/api/lessons/mandarin", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: await subtitleFile.text(), filename: subtitleFile.name, language: "zh" }),
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.detail || "Không thể đọc phụ đề.");
-    lesson = result;
-    if (videoUrl) URL.revokeObjectURL(videoUrl);
-    const mediaFile = videoInput.files[0];
-    if (mediaFile) {
-      videoUrl = URL.createObjectURL(mediaFile);
-      video.src = videoUrl;
-      video.hidden = false;
-      placeholder.hidden = true;
+    let response;
+    if (subtitleFile) {
+      response = await fetch("/api/lessons/mandarin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: await subtitleFile.text(),
+          filename: subtitleFile.name,
+          language: "zh",
+        }),
+      });
     } else {
-      video.removeAttribute("src");
-      video.hidden = true;
-      placeholder.hidden = false;
+      const body = new FormData();
+      body.append("video", mediaFile);
+      response = await fetch("/api/lessons/mandarin-video", { method: "POST", body });
     }
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "Không thể xử lý video.");
+    lesson = result;
     renderLesson();
-    formNote.textContent = "Bài học đã sẵn sàng. Video vẫn chỉ nằm trong trình duyệt.";
+    formNote.textContent = "Bài học đã sẵn sàng. Video và dữ liệu xử lý vẫn ở trên máy này.";
   } catch (error) {
     formNote.textContent = error.message;
   } finally {

@@ -3,6 +3,17 @@
 This is a compact evidence log, not a diary. Add an entry after a user correction,
 a defect that escaped a completed check, or a manual task repeated at least twice.
 
+## 2026-11-08 — Subtitle upload was incorrectly made the primary input
+
+- Evidence: the completed first UI required an SRT/VTT file; the user corrected
+  that ordinary learners only have a video and expect the product to process it.
+- Root cause: the easiest testable transcript path was mistaken for the product's
+  main user journey.
+- Reusable rule: local video is the required input; supplied or embedded Mandarin
+  subtitles are optimizations, and local ASR is the automatic fallback.
+- Verification: the form requires only video and the video endpoint produces timed
+  cues without an uploaded subtitle.
+
 ## 2026-11-08 — Project skill links used one too many parent traversals
 
 - Evidence: links created as `../../../skills/<name>` from `.agents/skills/` were

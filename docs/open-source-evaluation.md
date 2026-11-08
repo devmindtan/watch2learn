@@ -9,7 +9,8 @@ transitive licenses before pinning a production version.
 | --- | --- | --- | --- |
 | FFmpeg | media probing/extraction | LGPL/GPL depends on build flags | Use system binary; document build license |
 | yt-dlp | permitted URL metadata/captions | source distribution is Unlicense; bundled builds differ | Use Python/uv source install, subtitle-first |
-| SYSTRAN/faster-whisper | local ASR | MIT; model weights must be checked separately | Preferred ASR adapter |
+| SYSTRAN/faster-whisper | local ASR | MIT | CPU int8 ASR adapter |
+| Systran/faster-whisper-small | multilingual model weights | MIT; about 484 MB | Explicit local download; Mandarin baseline |
 | fxsjy/jieba | Mandarin segmentation | MIT | Baseline segmenter with correction support |
 | pypinyin | readings | MIT | Generate pinyin; retain dictionary readings |
 | CC-CEDICT | offline Chinese-English meanings | CC BY-SA 4.0; data obligations apply | Manual local install only; MDBG prohibits scripted access |
@@ -38,8 +39,8 @@ repository unless its exact license and attribution requirements are recorded.
   only when sentence translation becomes a scoped requirement.
 - HSK lists and frequency corpora: sources and licenses vary. Choose and document
   one dataset before implementing difficulty scoring.
-- Speech model: start with a small/medium Whisper-compatible model on CPU. Make the
-  model downloadable and replaceable; never silently download multi-GB weights.
+- Speech model: start with `Systran/faster-whisper-small` on CPU int8. Keep the
+  model replaceable and never download weights from an ordinary learner action.
 - Hosting: local Docker/manual execution first. Public hosting is not part of the
   initial promise because media processing has real compute/storage cost.
 
@@ -48,6 +49,7 @@ repository unless its exact license and attribution requirements are recorded.
 - Graphify: <https://github.com/Graphify-Labs/graphify>
 - Ponytail: <https://github.com/DietrichGebert/ponytail>
 - faster-whisper: <https://github.com/SYSTRAN/faster-whisper>
+- faster-whisper-small: <https://huggingface.co/Systran/faster-whisper-small>
 - yt-dlp: <https://github.com/yt-dlp/yt-dlp>
 - Jieba: <https://github.com/fxsjy/jieba>
 - CC-CEDICT: <https://cc-cedict.org/>

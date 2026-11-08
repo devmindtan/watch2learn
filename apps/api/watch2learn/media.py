@@ -75,3 +75,46 @@ def extract_asr_audio(source: str | Path, output: str | Path) -> Path:
         capture_output=True,
     )
     return output_path
+
+
+def preferred_subtitle_stream(probe: dict) -> int | None:
+    streams = [
+        stream for stream in probe.get("streams", []) if stream.get("codec_type") == "subtitle"
+    ]
+    if not streams:
+        return None
+    for stream in streams:
+        language = str(stream.get("tags", {}).get("language", "")).lower()
+        if language.startswith(("zh", "chi", "zho")):
+            return int(stream["index"])
+    for stream in streams:
+        language = str(stream.get("tags", {}).get("language", "")).lower()
+        if language in {"", "und"}:
+            return int(stream["index"])
+    return None
+
+
+def extract_embedded_subtitles(source: str | Path, stream_index: int, output: str | Path) -> Path:
+    source_path = Path(source)
+    output_path = Path(output)
+    if output_path.exists():
+        raise FileExistsError(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        [
+            str(media_binary("ffmpeg")),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-n",
+            "-i",
+            str(source_path),
+            "-map",
+            f"0:{stream_index}",
+            str(output_path),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    return output_path

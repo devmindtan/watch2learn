@@ -5,11 +5,12 @@
   "description": "Local-first vocabulary learning from permitted video content",
   "packageManager": "pnpm@10.16.1",
   "scripts": {
-    "dev": "uv run uvicorn watch2learn.app:app --app-dir apps/api --reload --port 8000",
+    "dev": "uv run --group asr uvicorn watch2learn.app:app --app-dir apps/api --reload --port 8000",
     "doctor": "bash scripts/doctor.sh",
-    "format:check": "uv run ruff format --check apps/api",
-    "lint": "uv run ruff check apps/api",
+    "format:check": "uv run ruff format --check apps/api scripts/bootstrap-asr-model.py",
+    "lint": "uv run ruff check apps/api scripts/bootstrap-asr-model.py",
     "policy:free": "bash scripts/check-free-policy.sh",
+    "setup:asr": "uv run --group asr python scripts/bootstrap-asr-model.py",
     "test": "uv run pytest",
     "whitespace": "git diff --check",
     "quality": "pnpm whitespace && pnpm policy:free && pnpm lint && pnpm format:check && pnpm test && bash scripts/doctor.sh --ci"

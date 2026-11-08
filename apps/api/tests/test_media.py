@@ -2,7 +2,7 @@ import wave
 from pathlib import Path
 
 import pytest
-from watch2learn.media import extract_asr_audio, probe_media
+from watch2learn.media import extract_asr_audio, preferred_subtitle_stream, probe_media
 
 
 def write_silent_wave(path: Path, channels: int = 2, rate: int = 48_000):
@@ -26,3 +26,19 @@ def test_probe_and_extract_audio_for_asr(tmp_path):
     assert derived["streams"][0]["channels"] == 1
     with pytest.raises(FileExistsError):
         extract_asr_audio(source, output)
+
+
+def test_prefers_only_mandarin_or_unlabeled_subtitles():
+    probe = {
+        "streams": [
+            {"index": 1, "codec_type": "subtitle", "tags": {"language": "eng"}},
+            {"index": 2, "codec_type": "subtitle", "tags": {"language": "zho"}},
+        ]
+    }
+    assert preferred_subtitle_stream(probe) == 2
+
+    probe["streams"][1]["tags"]["language"] = "jpn"
+    assert preferred_subtitle_stream(probe) is None
+
+    probe["streams"].append({"index": 3, "codec_type": "subtitle"})
+    assert preferred_subtitle_stream(probe) == 3

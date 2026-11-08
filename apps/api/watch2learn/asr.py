@@ -1,0 +1,63 @@
+"""Offline Mandarin transcription using an explicitly installed Whisper model."""
+
+import os
+from functools import lru_cache
+from pathlib import Path
+
+from .subtitles import Cue
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_MODEL_PATH = PROJECT_ROOT / "data" / "models" / "faster-whisper-small"
+
+
+def model_path() -> Path:
+    return Path(os.environ.get("WATCH2LEARN_WHISPER_MODEL", DEFAULT_MODEL_PATH))
+
+
+def model_ready() -> bool:
+    path = model_path()
+    return (path / "model.bin").is_file() and (path / "config.json").is_file()
+
+
+@lru_cache(maxsize=1)
+def load_model():
+    if not model_ready():
+        raise RuntimeError("ASR model is missing; run pnpm setup:asr once before processing video")
+    from faster_whisper import WhisperModel
+
+    return WhisperModel(
+        str(model_path()),
+        device="cpu",
+        compute_type="int8",
+        cpu_threads=max(1, min(8, os.cpu_count() or 1)),
+        local_files_only=True,
+    )
+
+
+def transcribe_mandarin(audio_path: str | Path) -> tuple[list[Cue], dict]:
+    segments, info = load_model().transcribe(
+        str(audio_path),
+        language="zh",
+        beam_size=5,
+        vad_filter=True,
+        word_timestamps=True,
+        condition_on_previous_text=True,
+    )
+    cues = [
+        Cue(
+            id=f"cue-{index}",
+            start_ms=round(segment.start * 1000),
+            end_ms=round(segment.end * 1000),
+            text=segment.text.strip(),
+        )
+        for index, segment in enumerate(segments, start=1)
+        if segment.text.strip() and segment.end > segment.start
+    ]
+    if not cues:
+        raise RuntimeError("No Mandarin speech was detected in this video")
+    return cues, {
+        "method": "faster-whisper",
+        "model": model_path().name,
+        "detected_language": info.language,
+        "language_probability": round(info.language_probability, 4),
+    }
