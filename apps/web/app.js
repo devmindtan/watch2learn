@@ -708,6 +708,7 @@ function renderCueText(container, cue, { compact = false } = {}) {
 }
 
 function translationText(cue) {
+  if (cue.translation_skipped === "not-chinese") return "Không phải tiếng Trung — giữ nguyên, không dịch";
   if (cue.translation_vi) return cue.translation_vi;
   if (cue.translation_vi === "") return "";
   return state.health?.translation_model_ready ? "Đang dịch theo câu…" : "";
@@ -715,7 +716,8 @@ function translationText(cue) {
 
 function updateTranslationNode(node, cue) {
   node.textContent = translationText(cue);
-  node.classList.toggle("is-pending", !cue.translation_vi);
+  node.classList.toggle("is-pending", !cue.translation_vi && !cue.translation_skipped);
+  node.classList.toggle("is-skipped", cue.translation_skipped === "not-chinese");
 }
 
 function endsTranslationGroup(cue) {
@@ -1130,7 +1132,7 @@ async function backfillTranslations() {
   const lesson = state.lesson;
   if (!state.health?.translation_model_ready) return;
   const complete = lesson.cues.every((cue) => typeof cue.translation_vi === "string");
-  if (lesson.translation?.unit === "sentence" && complete) return;
+  if (lesson.translation?.unit === "zh-sentence" && complete) return;
   try {
     const result = await responseJson(await fetch(`/api/lessons/${lesson.id}/translations`, { method: "POST" }));
     lesson.translation = result.translation;

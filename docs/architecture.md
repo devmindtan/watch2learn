@@ -77,7 +77,13 @@ Translation works on sentences, not subtitle lines: consecutive cues are joined
 when a cue lacks closing punctuation, the pause is ≤700 ms and the sentence stays
 ≤60 characters (max 3 cues). Each cue carries the sentence's `translation_vi`
 plus `translation_group`/`translation_group_end` (or `null` when the optional
-model is missing); the lesson records `translation.unit = "sentence"`. Bracketed
+model is missing); the lesson records `translation.unit = "zh-sentence"`.
+Only Chinese is ever translated (`translation.chinese_source`): lines without Han
+characters, or containing kana/Hangul, are kept verbatim with
+`translation_skipped = "not-chinese"`; mostly-foreign lines translate only their
+Chinese characters; foreign lines break sentence groups. ASR starts in Chinese but
+detects language per window (`multilingual=True`) so foreign speech is transcribed
+in its own language rather than rendered as Chinese. Bracketed
 stage directions are translated from their inner text and model markup is
 stripped. `POST /api/lessons/{id}/translations` re-translates and persists older
 lessons. The word card shows "Trong câu này" — the CVDICT sense whose wording

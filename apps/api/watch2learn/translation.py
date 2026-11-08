@@ -15,6 +15,26 @@ SPECIAL_TOKENS = {"</s>", "<s>", "<pad>", "<unk>"}
 _LOCK = Lock()
 WRAPPED_RE = re.compile(r"^\s*[（(【\[]\s*(.+?)\s*[）)】\]]\s*$")
 MARKUP_RE = re.compile(r"\{\\[^}]*\}|<[^>]{1,40}>")
+HAN_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+NON_HAN_LETTERS_RE = re.compile(r"[^\W\d_\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+")
+KANA_HANGUL_RE = re.compile(r"[\u3040-\u30ff\u31f0-\u31ff\uac00-\ud7af\u1100-\u11ff]")
+TRANSLATION_UNIT = "zh-sentence"
+
+
+def chinese_source(text: str) -> str:
+    """The part of a cue that may be translated: only Chinese is ever translated.
+
+    Mostly-Chinese lines are kept whole (names like iPhone stay in context). Lines
+    that are mostly another script keep only their Chinese characters. Lines with
+    no Chinese characters (English, Japanese kana, Korean, ♪ …) return "".
+    """
+    han = len(HAN_RE.findall(text))
+    if not han or KANA_HANGUL_RE.search(text):  # kanji/hanja inside Japanese/Korean
+        return ""
+    foreign_words = len(NON_HAN_LETTERS_RE.findall(text))
+    if han >= foreign_words * 2:  # one foreign word ≈ two Chinese characters
+        return text
+    return " ".join(NON_HAN_LETTERS_RE.sub(" ", text).split())
 
 
 def clean_output(text: str) -> str:
@@ -100,9 +120,10 @@ MAX_GROUP_CUES = 3
 def sentence_groups(cues: list) -> list[list[int]]:
     """Join cues that split one sentence so it is translated as a whole.
 
-    A cue continues into the next when it lacks closing punctuation, the pause is
-    short, and the joined text stays sentence-sized.
+    A cue continues into the next when both are Chinese, it lacks closing
+    punctuation, the pause is short, and the joined text stays sentence-sized.
     """
+    chinese = [bool(chinese_source(cue.text)) for cue in cues]
     groups: list[list[int]] = []
     current: list[int] = []
     length = 0
@@ -112,6 +133,8 @@ def sentence_groups(cues: list) -> list[list[int]]:
         following = cues[index + 1] if index + 1 < len(cues) else None
         continues = (
             following is not None
+            and chinese[index]
+            and chinese[index + 1]
             and not cue.text.rstrip().endswith(SENTENCE_END)
             and following.start_ms - cue.end_ms <= MAX_GROUP_GAP_MS
             and length + len(following.text) <= MAX_GROUP_CHARACTERS
@@ -137,13 +160,14 @@ def translate_cues_in_context(cues: list) -> list[dict]:
     """Per cue: the Vietnamese translation of the sentence it belongs to."""
     groups = sentence_groups(cues)
     sentences = translate_to_vietnamese(
-        [join_cue_text([cues[index].text for index in group]) for group in groups]
+        [join_cue_text([chinese_source(cues[index].text) for index in group]) for group in groups]
     )
     rows: list[dict] = [{} for _ in cues]
     for group, sentence in zip(groups, sentences, strict=True):
         for index in group:
             rows[index] = {
-                "translation_vi": sentence,
+                "translation_vi": sentence if chinese_source(cues[index].text) else "",
+                "translation_skipped": None if chinese_source(cues[index].text) else "not-chinese",
                 "translation_group": cues[group[0]].id,
                 "translation_group_end": cues[group[-1]].id,
             }

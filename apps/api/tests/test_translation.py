@@ -68,7 +68,7 @@ def test_saved_lesson_translation_backfill_is_persisted(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert [cue["translation_vi"] for cue in response.json()["cues"]] == ["vi:你好。", "vi:再见。"]
     saved = app_module.jobs.get(job["id"])["result"]
-    assert saved["translation"]["unit"] == "sentence"
+    assert saved["translation"]["unit"] == "zh-sentence"
     assert saved["cues"][1]["translation_vi"] == "vi:再见。"
 
 
@@ -89,3 +89,32 @@ def test_bracketed_stage_direction_translates_inner_text():
     result = translation.translate_to_vietnamese(["（轻轻地哼着歌）"])[0]
     assert result.startswith("(") and result.endswith(")")
     assert "{" not in result and "\\" not in result
+
+
+def test_only_chinese_is_sent_for_translation(monkeypatch):
+    assert translation.chinese_source("I love Beijing ♪") == ""
+    assert translation.chinese_source("こんにちは、元気ですか") == ""
+    assert translation.chinese_source("안녕하세요") == ""
+    assert translation.chinese_source("Xin chào các bạn") == ""
+    assert translation.chinese_source("我喜欢iPhone。") == "我喜欢iPhone。"
+    assert translation.chinese_source("Daily routine in Chinese 日常生活") == "日常生活"
+
+    seen = []
+
+    def fake_translate(texts):
+        seen.extend(texts)
+        return [f"vi:{text}" for text in texts]
+
+    monkeypatch.setattr(translation, "translate_to_vietnamese", fake_translate)
+    rows = translation.translate_cues_in_context(
+        [
+            Cue("a", 0, 1000, "如果明天不下雨"),
+            Cue("b", 1100, 2000, "OK, let's go"),
+            Cue("c", 2100, 3000, "我们就去爬山。"),
+        ]
+    )
+    assert "OK, let's go" not in seen and all("let" not in text for text in seen)
+    assert rows[1]["translation_vi"] == ""
+    assert rows[1]["translation_skipped"] == "not-chinese"
+    assert rows[0]["translation_group_end"] == "a"  # foreign line breaks the sentence group
+    assert rows[2]["translation_vi"] == "vi:我们就去爬山。"

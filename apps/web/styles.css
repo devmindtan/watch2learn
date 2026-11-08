@@ -169,6 +169,7 @@ main { width: min(1560px, 100%); margin: 0 auto; }
 .cue-text { margin: 0; font: 500 1.2rem/2.2 var(--cjk); }
 .cue-translation { margin: 0 0 2px; font-size: .9rem; color: var(--muted); }
 .translation.is-pending { font-style: italic; opacity: .7; }
+.translation.is-skipped { font-size: .78rem; font-style: italic; color: var(--muted); opacity: .8; }
 .hide-translation .translation { display: none; }
 
 /* Tokens */

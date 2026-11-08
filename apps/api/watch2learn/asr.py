@@ -42,6 +42,9 @@ def transcribe_mandarin(
     segments, info = load_model().transcribe(
         str(audio_path),
         language="zh",
+        # Detect language per window: foreign speech stays in its own language instead
+        # of being rendered as Chinese, so it is never translated as if it were Chinese.
+        multilingual=True,
         beam_size=5,
         vad_filter=True,
         word_timestamps=True,

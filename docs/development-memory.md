@@ -118,3 +118,15 @@ a defect that escaped a completed check, or a manual task repeated at least twic
 - Reusable rule: move the analysed source to `data/media/<lesson-id>/` before job
   cleanup; delete it only with the lesson.
 - Verification: `test_uploaded_video_is_kept_in_lesson_media_folder`.
+
+## 2026-11-08 — non-Chinese lines were sent to the zh→vi translator
+
+- Evidence: the learner required that only Chinese is translated. English lines
+  ("OK, let us start the lesson.") were passed to OPUS-MT, and ASR forced to
+  `language="zh"` can render foreign speech as Chinese text.
+- Root cause: translation and ASR assumed every cue was Mandarin.
+- Reusable rule: gate translation with `chinese_source` (Han present, no kana/
+  Hangul; mostly-foreign lines keep only Han), mark skipped cues, and run ASR with
+  per-window language detection.
+- Verification: `test_only_chinese_is_sent_for_translation`; mixed English/Chinese
+  audio keeps English verbatim and untranslated.

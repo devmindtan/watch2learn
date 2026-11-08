@@ -81,7 +81,7 @@ class YoutubeLessonRequest(BaseModel):
 
 def translate_cues(cues: list[Cue]) -> tuple[list[dict] | None, dict]:
     """Translate whole sentences when the optional local model exists; never fail a lesson."""
-    details = translation.provenance() | {"unit": "sentence"}
+    details = translation.provenance() | {"unit": translation.TRANSLATION_UNIT}
     if not details["available"]:
         return None, details
     try:
@@ -495,7 +495,7 @@ async def translate_saved_lesson(lesson_id: str) -> dict:
         )
     current = lesson.get("translation") or {}
     complete = all(cue.get("translation_vi") is not None for cue in lesson["cues"])
-    if not (current.get("unit") == "sentence" and complete):
+    if not (current.get("unit") == translation.TRANSLATION_UNIT and complete):
         cues = [
             Cue(cue["id"], cue["start_ms"], cue["end_ms"], cue["text"]) for cue in lesson["cues"]
         ]
@@ -511,7 +511,13 @@ async def translate_saved_lesson(lesson_id: str) -> dict:
         "cues": [
             {
                 key: cue.get(key)
-                for key in ("id", "translation_vi", "translation_group", "translation_group_end")
+                for key in (
+                    "id",
+                    "translation_vi",
+                    "translation_skipped",
+                    "translation_group",
+                    "translation_group_end",
+                )
             }
             for cue in lesson["cues"]
         ],
