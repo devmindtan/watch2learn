@@ -26,12 +26,16 @@ languages can be added later.
 The local MVP accepts a Mandarin video, shows durable processing progress, prefers
 embedded or optional SRT/WebVTT subtitles, and otherwise transcribes audio locally.
 It extracts timestamped vocabulary with Jieba and pypinyin, preserves neighboring
-cue context, adds offline CC-CEDICT meanings, and saves completed lessons in SQLite.
+cue context, adds offline Vietnamese (CVDICT) and English (CC-CEDICT) meanings,
+chooses pinyin from the sentence context, translates each cue to Vietnamese with a
+local OPUS-MT model, and saves completed lessons in SQLite. The learning screen
+replays or loops the original sentence, reads words aloud with the browser's
+offline voices, and lets learners mark known words and write their own meanings.
 
 ## Start here
 
 ```bash
-pnpm setup                          # one-time local tool/model/dictionary setup
+pnpm setup                          # one-time local tool/model/dictionary/translation setup
 pnpm dev
 ```
 

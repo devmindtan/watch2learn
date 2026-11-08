@@ -26,7 +26,9 @@ browser
 | Media | FFmpeg/ffprobe | Mature local extraction and probing |
 | URL captions | yt-dlp | Subtitle-first acquisition for permitted sources |
 | ASR fallback | faster-whisper | Local CPU/GPU transcription; word timestamps |
-| Mandarin adapter | Jieba + pypinyin + CC-CEDICT | Offline segmentation, readings, meanings |
+| Mandarin adapter | Jieba + pypinyin + CC-CEDICT + CVDICT | Offline segmentation, context readings, English/Vietnamese meanings |
+| Sentence translation | OPUS-MT zh→vi on CTranslate2 | Optional local machine translation per cue |
+| Pronunciation | Original cue audio + browser Web Speech voices | No server TTS; replay the real sentence first |
 | Browser tests | Playwright | Critical playback/transcript flow validation |
 
 The browser keeps an object URL for playback and sends the video to the local API
@@ -56,6 +58,14 @@ object store until measured requirements make the local design insufficient.
   Each language implements the same adapter contract.
 - `lessons`: combines occurrences, definitions, learner-known state, and ranking.
 - `review`: owns saved vocabulary and scheduling; it does not mutate transcripts.
+
+Each cue carries `translation_vi` (or `null` when the optional model is missing)
+and the lesson records translation provenance. `POST /api/translate` translates up
+to 100 lines for lessons saved before translation was installed; the browser uses
+it only to fill missing cue translations. Pinyin is chosen per occurrence: the
+whole cue is read by pypinyin, and the dictionary entry whose reading matches is
+selected, so polyphonic words (更 gèng/gēng, 行 xíng/háng) get the sense used in
+that sentence; other readings stay available as `alternatives`.
 
 ## Mandarin record shape
 

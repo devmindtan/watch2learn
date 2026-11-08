@@ -85,3 +85,14 @@ a defect that escaped a completed check, or a manual task repeated at least twic
 - Reusable rule: make whitespace validation part of `pnpm quality`, not only the
   final commit command; keep the cached-diff check immediately before commit too.
 - Verification: `pnpm whitespace` and `git diff --cached --check` both pass.
+
+## 2026-11-08 — polyphonic words showed the first dictionary reading
+
+- Evidence: in "这样更容易理解" the UI showed 更 as *gēng* "to change" instead of
+  *gèng* "more"; the learner-facing reading and meaning were both wrong.
+- Root cause: the lesson always used `dictionary.lookup(word)[0]`, ignoring the
+  sentence the word appeared in.
+- Reusable rule: choose readings per occurrence from the whole cue (pypinyin), pick
+  the dictionary entry whose reading matches, and keep the other entries as
+  learner-visible alternatives.
+- Verification: `test_polyphonic_word_uses_sentence_reading_and_keeps_alternatives`.

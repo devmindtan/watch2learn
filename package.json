@@ -5,14 +5,15 @@
   "description": "Local-first vocabulary learning from permitted video content",
   "packageManager": "pnpm@10.16.1",
   "scripts": {
-    "setup": "uv sync --group asr && bash scripts/bootstrap-media-tools.sh && pnpm setup:asr && pnpm setup:dictionary",
+    "setup": "uv sync --group asr && bash scripts/bootstrap-media-tools.sh && pnpm setup:asr && pnpm setup:dictionary && pnpm setup:translation",
     "dev": "uv run --group asr uvicorn watch2learn.app:app --app-dir apps/api --reload --port 8000",
     "doctor": "bash scripts/doctor.sh",
-    "format:check": "uv run ruff format --check apps/api scripts/bootstrap-asr-model.py scripts/bootstrap-dictionary.py",
-    "lint": "uv run ruff check apps/api scripts/bootstrap-asr-model.py scripts/bootstrap-dictionary.py",
+    "format:check": "uv run ruff format --check apps/api scripts/bootstrap-asr-model.py scripts/bootstrap-dictionary.py scripts/bootstrap-translation-model.py",
+    "lint": "uv run ruff check apps/api scripts/bootstrap-asr-model.py scripts/bootstrap-dictionary.py scripts/bootstrap-translation-model.py",
     "policy:free": "bash scripts/check-free-policy.sh",
     "setup:asr": "uv run --group asr python scripts/bootstrap-asr-model.py",
     "setup:dictionary": "uv run python scripts/bootstrap-dictionary.py",
+    "setup:translation": "uv run python scripts/bootstrap-translation-model.py",
     "test": "uv run --group asr pytest",
     "whitespace": "git diff --check",
     "quality": "pnpm whitespace && pnpm policy:free && pnpm lint && pnpm format:check && pnpm test && bash scripts/doctor.sh --ci"

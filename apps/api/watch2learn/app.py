@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import logging
 import shutil
 import subprocess
 import tempfile
@@ -15,17 +16,17 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import jobs
+from . import jobs, translation
 from .asr import model_ready, transcribe_mandarin
-from .dictionary import load_cedict
-from .lesson import build_lesson
+from .dictionary import load_cedict, load_vietnamese
+from .lesson import ANALYSIS_VERSION, add_vietnamese_definitions, build_lesson
 from .media import (
     extract_asr_audio,
     extract_embedded_subtitles,
     preferred_subtitle_stream,
     probe_media,
 )
-from .subtitles import parse_subtitles
+from .subtitles import Cue, parse_subtitles
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 WEB_ROOT = PROJECT_ROOT / "apps" / "web"
@@ -34,6 +35,8 @@ MAX_VIDEO_BYTES = 4 * 1024 * 1024 * 1024
 MEDIA_SUFFIXES = {".mp4", ".mkv", ".mov", ".webm", ".avi", ".m4v", ".mp3", ".m4a", ".wav"}
 JOBS_ROOT = PROJECT_ROOT / "data" / "jobs"
 RUNNING_TASKS: set[asyncio.Task] = set()
+MAX_TRANSLATION_LINES = 100
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -62,6 +65,33 @@ class LessonRequest(BaseModel):
     language: str = Field(default="zh", pattern=r"^zh(?:-(?:Hans|Hant))?$")
 
 
+class TranslationRequest(BaseModel):
+    texts: list[Annotated[str, Field(max_length=translation.MAX_TEXT_CHARACTERS)]] = Field(
+        min_length=1, max_length=MAX_TRANSLATION_LINES
+    )
+
+
+def translate_cues(cues: list[Cue]) -> tuple[list[str] | None, dict]:
+    """Translate cue text when the optional local model exists; never fail the lesson."""
+    details = translation.provenance()
+    if not details["available"]:
+        return None, details
+    try:
+        return translation.translate_to_vietnamese([cue.text for cue in cues]), details
+    except Exception as error:  # model output/runtime is untrusted and optional
+        logger.warning("Vietnamese translation failed: %s", error)
+        return None, details | {"available": False, "error": type(error).__name__}
+
+
+def analyze_cues(
+    cues: list[Cue], report: Callable[[str, int], None] = lambda _stage, _progress: None
+) -> dict:
+    report("translating", 88)
+    translations, translation_details = translate_cues(cues)
+    report("analyzing-vocabulary", 94)
+    return build_lesson(cues, load_cedict(), load_vietnamese(), translations, translation_details)
+
+
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(WEB_ROOT / "index.html")
@@ -73,7 +103,9 @@ async def health() -> dict:
     return {
         "status": "ok",
         "dictionary_loaded": dictionary.source is not None,
+        "vietnamese_dictionary_loaded": load_vietnamese().source is not None,
         "asr_model_ready": model_ready(),
+        "translation_model_ready": translation.model_ready(),
     }
 
 
@@ -83,7 +115,7 @@ async def create_mandarin_lesson(request: LessonRequest) -> dict:
         cues = parse_subtitles(request.content)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    lesson = build_lesson(cues, load_cedict())
+    lesson = await asyncio.to_thread(analyze_cues, cues)
     return {
         "filename": request.filename,
         "language": request.language,
@@ -122,11 +154,7 @@ def process_video(
         except (OSError, UnicodeDecodeError, ValueError):
             cues = []
         if cues:
-            report("analyzing-vocabulary", 90)
-            return {
-                "transcript": {"method": "uploaded-subtitle"},
-                **build_lesson(cues, load_cedict()),
-            }
+            return {"transcript": {"method": "uploaded-subtitle"}, **analyze_cues(cues, report)}
 
     report("probing-video", 15)
     probe = probe_media(source)
@@ -142,8 +170,7 @@ def process_video(
         except (OSError, UnicodeDecodeError, ValueError, subprocess.SubprocessError):
             cues = []
         if cues:
-            report("analyzing-vocabulary", 90)
-            return {"transcript": transcript, **build_lesson(cues, load_cedict())}
+            return {"transcript": transcript, **analyze_cues(cues, report)}
 
     if not any(stream.get("codec_type") == "audio" for stream in probe.get("streams", [])):
         raise RuntimeError("Video has no readable audio or subtitle stream")
@@ -154,8 +181,7 @@ def process_video(
         audio_path,
         on_progress=lambda fraction: report("transcribing-mandarin", 40 + round(fraction * 45)),
     )
-    report("analyzing-vocabulary", 90)
-    return {"transcript": transcript, **build_lesson(cues, load_cedict())}
+    return {"transcript": transcript, **analyze_cues(cues, report)}
 
 
 def run_video_job(
@@ -227,7 +253,8 @@ async def create_mandarin_video_lesson(
                 subtitle, subtitle_path, MAX_SUBTITLE_CHARACTERS * 4
             )
 
-        fingerprint = hashlib.sha256(f"{video_digest}:{subtitle_digest}:zh-v1".encode()).hexdigest()
+        fingerprint_source = f"{video_digest}:{subtitle_digest}:{ANALYSIS_VERSION}"
+        fingerprint = hashlib.sha256(fingerprint_source.encode()).hexdigest()
         existing = jobs.find_completed(fingerprint)
         if existing:
             shutil.rmtree(work_dir, ignore_errors=True)
@@ -262,4 +289,16 @@ async def saved_lesson(lesson_id: str) -> dict:
     job = jobs.get(lesson_id)
     if not job or job["status"] != "complete":
         raise HTTPException(status_code=404, detail="Completed lesson was not found")
-    return job["result"]
+    return add_vietnamese_definitions(job["result"], load_cedict(), load_vietnamese())
+
+
+@app.post("/api/translate")
+async def translate(request: TranslationRequest) -> dict:
+    """Translate transcript lines locally, e.g. for lessons saved before translation."""
+    if not translation.model_ready():
+        raise HTTPException(
+            status_code=503,
+            detail="Mô hình dịch offline chưa được cài. Chạy pnpm setup:translation.",
+        )
+    translations = await asyncio.to_thread(translation.translate_to_vietnamese, request.texts)
+    return {"translations": translations, **translation.provenance()}

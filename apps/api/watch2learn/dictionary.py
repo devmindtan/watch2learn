@@ -1,4 +1,4 @@
-"""Minimal CC-CEDICT parser with explicit local data provenance."""
+"""Minimal CC-CEDICT-format parser (CC-CEDICT, CVDICT) with explicit local data provenance."""
 
 import re
 from dataclasses import dataclass
@@ -11,6 +11,7 @@ CEDICT_RE = re.compile(
 )
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_PATH = PROJECT_ROOT / "data" / "dictionaries" / "cedict_ts.u8"
+VIETNAMESE_PATH = PROJECT_ROOT / "data" / "dictionaries" / "cvdict.u8"
 
 
 @dataclass(frozen=True)
@@ -59,3 +60,8 @@ def load_cedict(path: str | Path = DEFAULT_PATH) -> Cedict:
     if not source.is_file():
         return Cedict.empty()
     return Cedict.from_text(source.read_text(encoding="utf-8-sig"), source)
+
+
+def load_vietnamese() -> Cedict:
+    """Chinese-Vietnamese meanings from CVDICT, which shares the CC-CEDICT format."""
+    return load_cedict(VIETNAMESE_PATH)

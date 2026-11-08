@@ -15,6 +15,9 @@ transitive licenses before pinning a production version.
 | fxsjy/jieba | Mandarin segmentation | MIT | Baseline segmenter with correction support |
 | pypinyin | readings | MIT | Generate pinyin; retain dictionary readings |
 | CC-CEDICT | offline Chinese-English meanings | CC BY-SA 4.0; attribution/share-alike apply | Pinned checksummed snapshot from an unmodified GitHub redistribution mirror; never script MDBG |
+| CVDICT (`ph0ngp/CVDICT`) | offline Chinese-Vietnamese meanings | CC BY-SA 4.0; derived from CC-CEDICT; meanings were machine-translated then manually reviewed by its author | Pinned commit + SHA-256; labelled as CVDICT in the UI; English CC-CEDICT kept alongside |
+| CTranslate2 + SentencePiece | local sentence-translation runtime | MIT / Apache-2.0 | CPU int8 inference; CTranslate2 already ships with faster-whisper |
+| Helsinki-NLP/opus-mt-zh-vi (CTranslate2 int8 conversion `manancode/opus-mt-zh-vi-ctranslate2-android`) | offline zh→vi sentence translation | Apache-2.0; about 83 MB | Explicit `pnpm setup:translation`; pinned revision + per-file SHA-256; optional — lessons still work without it |
 | Playwright | browser verification | Apache-2.0 | Critical flows only |
 | FastAPI | local HTTP API | MIT | Serve the local lesson API and static client |
 | pypinyin | Mandarin readings | MIT | Context-aware phrase readings with generated fallback |
@@ -35,9 +38,13 @@ repository unless its exact license and attribution requirements are recorded.
 
 ## Deferred choices
 
-- Translation: CC-CEDICT is enough for the first Mandarin vocabulary slice. Do not
-  add a generative translation service. Evaluate a fully local translation model
-  only when sentence translation becomes a scoped requirement.
+- Translation: sentence translation is now in scope and uses local OPUS-MT zh→vi
+  (see above). Output is labelled as machine translation. A direct conversion from
+  the original Helsinki-NLP weights would remove the third-party conversion, but
+  needs PyTorch/Transformers at setup time; revisit if provenance needs tightening.
+- Sino-Vietnamese (Hán Việt) readings: Unihan `kVietnamese` was evaluated and
+  rejected for now — it misses common characters (電, 說, 愛) and mixes Nôm readings
+  (們 → "món"). Choose a reviewed, clearly licensed dataset before adding it.
 - HSK lists and frequency corpora: sources and licenses vary. Choose and document
   one dataset before implementing difficulty scoring.
 - Speech model: start with `Systran/faster-whisper-small` on CPU int8. Keep the
@@ -54,6 +61,8 @@ repository unless its exact license and attribution requirements are recorded.
 - yt-dlp: <https://github.com/yt-dlp/yt-dlp>
 - Jieba: <https://github.com/fxsjy/jieba>
 - CC-CEDICT: <https://cc-cedict.org/>
+- CVDICT: <https://github.com/ph0ngp/CVDICT>
+- OPUS-MT zh-vi: <https://huggingface.co/Helsinki-NLP/opus-mt-zh-vi>
 - FastAPI: <https://github.com/fastapi/fastapi>
 - pypinyin: <https://github.com/mozillazg/python-pinyin>
 - YT Mandarin Subs: <https://github.com/cmyui/yt-mandarin-subs>

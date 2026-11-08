@@ -1,7 +1,8 @@
 # Local dictionaries
 
-Run `pnpm setup` to install the pinned CC-CEDICT UTF-8 snapshot at
-`data/dictionaries/cedict_ts.u8`. Dictionary dumps are intentionally ignored by
+Run `pnpm setup:dictionary` (included in `pnpm setup`) to install the pinned
+CC-CEDICT snapshot at `data/dictionaries/cedict_ts.u8` and the pinned CVDICT
+Chinese-Vietnamese snapshot at `data/dictionaries/cvdict.u8`. Dictionary dumps are intentionally ignored by
 Git.
 
 The canonical download page is <https://www.mdbg.net/chinese/dictionary?page=cc-cedict>.

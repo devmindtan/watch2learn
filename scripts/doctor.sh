@@ -44,6 +44,8 @@ if [[ "$ci_mode" == false ]]; then
     "data/models/faster-whisper-small/model.bin"
     "data/models/faster-whisper-small/config.json"
     "data/dictionaries/cedict_ts.u8"
+    "data/dictionaries/cvdict.u8"
+    "data/models/opus-mt-zh-vi/model.bin"
   )
   for asset_path in "${required_assets[@]}"; do
     if [[ -f "$project_root/$asset_path" ]]; then

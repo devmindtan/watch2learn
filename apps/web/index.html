@@ -9,37 +9,42 @@
     <link rel="stylesheet" href="/assets/styles.css" />
   </head>
   <body>
-    <header class="site-header">
-      <a class="brand" href="/" aria-label="Watch2Learn home">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Watch2Learn – thư viện">
         <span class="brand-mark" aria-hidden="true">文</span>
-        <span>Watch2Learn</span>
+        <span class="brand-name">Watch2Learn</span>
       </a>
-      <p>Học từ trong câu. Nhớ từ trong khoảnh khắc.</p>
+      <button id="library-button" class="ghost-button" type="button" hidden>
+        <span aria-hidden="true">←</span> Thư viện
+      </button>
+      <p id="lesson-title" class="lesson-title" hidden></p>
+      <div id="view-toggles" class="view-toggles" hidden>
+        <label class="toggle">
+          <input id="pinyin-toggle" type="checkbox" checked />
+          <span>Pinyin</span>
+        </label>
+        <label class="toggle">
+          <input id="translation-toggle" type="checkbox" checked />
+          <span>Tiếng Việt</span>
+        </label>
+      </div>
     </header>
 
     <main>
-      <section class="intro" aria-labelledby="intro-title">
-        <div>
-          <p class="eyebrow">Mandarin · local-first</p>
-          <h1 id="intro-title">Biến video bạn đang xem thành bài học từ vựng.</h1>
-          <p class="intro-copy">
-            Chọn một video tiếng Trung; hệ thống xử lý âm thanh ngay trên máy và giữ
-            mỗi từ bên cạnh câu trước, câu hiện tại và câu tiếp theo.
-          </p>
-        </div>
-        <form id="lesson-form" class="import-card">
-          <label>
-            <span>Video trên máy</span>
+      <section id="library" class="library" aria-label="Thư viện bài học">
+        <form id="lesson-form" class="card import-card">
+          <h1>Tạo bài học mới</h1>
+          <label class="dropzone" id="dropzone">
             <input id="video-file" type="file" accept="video/*,audio/*" required />
+            <span class="dropzone-icon" aria-hidden="true">▶</span>
+            <strong id="video-name">Chọn hoặc kéo thả video tiếng Trung</strong>
+            <small>MP4, MKV, MOV, WEBM hoặc file âm thanh · xử lý ngay trên máy</small>
           </label>
-          <label>
-            <span>Phụ đề tiếng Trung <small>(tùy chọn)</small></span>
+          <details class="subtitle-option">
+            <summary>Đã có phụ đề tiếng Trung? <small>(tùy chọn, nhanh hơn)</small></summary>
             <input id="subtitle-file" type="file" accept=".srt,.vtt,text/vtt" />
-          </label>
-          <button type="submit">Tạo bài học</button>
-          <p id="form-note" class="form-note">
-            Không cần phụ đề, tài khoản hay API key. Video được gửi tới bộ xử lý local trên máy này.
-          </p>
+          </details>
+          <button class="primary-button" type="submit">Tạo bài học</button>
           <div id="job-progress" class="job-progress" hidden>
             <div>
               <span id="job-stage">Đang chuẩn bị…</span>
@@ -47,61 +52,93 @@
             </div>
             <progress id="job-progress-bar" max="100" value="0">0%</progress>
           </div>
-          <section class="recent-lessons" aria-labelledby="recent-title">
-            <h2 id="recent-title">Bài học gần đây</h2>
-            <p id="recent-empty">Chưa có bài học nào được lưu trên máy này.</p>
-            <ol id="recent-list"></ol>
-          </section>
+          <p id="form-note" class="form-note" role="status"></p>
+          <ul id="readiness" class="readiness" aria-label="Thành phần offline"></ul>
         </form>
+
+        <section class="card recent-card" aria-labelledby="recent-title">
+          <h2 id="recent-title">Bài học gần đây</h2>
+          <p id="recent-empty" class="muted">Chưa có bài học nào được lưu trên máy này.</p>
+          <ol id="recent-list" class="recent-list"></ol>
+        </section>
       </section>
 
-      <section id="workspace" class="workspace" hidden aria-live="polite">
-        <div class="learning-column">
+      <section id="workspace" class="workspace" hidden>
+        <div class="stage">
           <div class="player-shell">
-            <video id="video" controls preload="metadata"></video>
-            <div id="audio-placeholder" class="audio-placeholder" hidden>
-              Đang chuẩn bị video để phát đúng khoảnh khắc.
+            <video id="video" controls preload="metadata" playsinline></video>
+            <div id="video-missing" class="video-missing" hidden>
+              <p>Bài học đã lưu, nhưng video gốc không được giữ lại trên máy chủ.</p>
+              <label class="secondary-button">
+                Chọn lại video gốc để phát
+                <input id="reattach-file" type="file" accept="video/*,audio/*" />
+              </label>
             </div>
           </div>
-          <div class="transcript-heading">
-            <div>
-              <p class="eyebrow">Transcript</p>
-              <h2>Nghe và đọc trong ngữ cảnh</h2>
+
+          <section class="now-card" aria-label="Câu đang học">
+            <div class="now-toolbar">
+              <p class="now-meta">
+                <span id="now-index">Câu –</span>
+                <button id="now-time" class="time-link" type="button">0:00</button>
+              </p>
+              <div class="now-controls" role="group" aria-label="Điều khiển câu">
+                <button id="prev-cue" class="icon-button" type="button" title="Câu trước (←)" aria-label="Câu trước">‹</button>
+                <button id="replay-cue" class="control-button" type="button" title="Nghe lại câu trong video (R)">
+                  <span aria-hidden="true">↻</span> Nghe lại
+                </button>
+                <button id="loop-cue" class="control-button" type="button" aria-pressed="false" title="Lặp lại câu này (L)">
+                  <span aria-hidden="true">⟲</span> Lặp câu
+                </button>
+                <button id="speak-cue" class="control-button" type="button" title="Đọc chậm bằng giọng máy">
+                  <span aria-hidden="true">🔈</span> Đọc chậm
+                </button>
+                <button id="next-cue" class="icon-button" type="button" title="Câu sau (→)" aria-label="Câu sau">›</button>
+              </div>
             </div>
-            <label class="switch-label">
-              <input id="pinyin-toggle" type="checkbox" checked />
-              Hiện pinyin
-            </label>
-          </div>
-          <ol id="transcript" class="transcript"></ol>
+            <p id="now-text" class="now-text" lang="zh"></p>
+            <p id="now-translation" class="now-translation translation"></p>
+          </section>
+          <p class="shortcuts">
+            Phím tắt: <kbd>Space</kbd> phát/dừng · <kbd>←</kbd><kbd>→</kbd> đổi câu ·
+            <kbd>R</kbd> nghe lại · <kbd>L</kbd> lặp câu · <kbd>P</kbd> pinyin · <kbd>T</kbd> bản dịch
+          </p>
         </div>
 
-        <aside class="vocabulary-panel" aria-labelledby="vocabulary-title">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Từ trong video</p>
-              <h2 id="vocabulary-title">Từ vựng</h2>
+        <aside class="side">
+          <section id="word-detail" class="word-card" hidden aria-label="Chi tiết từ"></section>
+          <div class="tabs" role="tablist" aria-label="Nội dung bài học">
+            <button id="tab-transcript" role="tab" type="button" aria-selected="true" aria-controls="panel-transcript">
+              Phụ đề <span id="cue-count" class="count"></span>
+            </button>
+            <button id="tab-vocabulary" role="tab" type="button" aria-selected="false" aria-controls="panel-vocabulary" tabindex="-1">
+              Từ vựng <span id="word-count" class="count"></span>
+            </button>
+          </div>
+          <div id="panel-transcript" class="panel" role="tabpanel" aria-labelledby="tab-transcript">
+            <ol id="transcript" class="transcript"></ol>
+          </div>
+          <div id="panel-vocabulary" class="panel" role="tabpanel" aria-labelledby="tab-vocabulary" hidden>
+            <div class="vocab-tools">
+              <input id="vocab-search" type="search" placeholder="Tìm chữ Hán, pinyin hoặc nghĩa…" aria-label="Tìm từ" />
+              <div class="segmented" role="group" aria-label="Lọc từ">
+                <button type="button" data-filter="all" aria-pressed="true">Tất cả</button>
+                <button type="button" data-filter="learning" aria-pressed="false">Đang học</button>
+                <button type="button" data-filter="known" aria-pressed="false">Đã biết</button>
+              </div>
             </div>
-            <span id="word-count" class="count"></span>
+            <div id="dictionary-notice" class="notice" hidden></div>
+            <ol id="vocabulary-list" class="vocabulary-list"></ol>
+            <p id="vocab-empty" class="muted" hidden>Không có từ nào khớp.</p>
           </div>
-          <div id="dictionary-notice" class="notice" hidden></div>
-          <div id="word-detail" class="word-detail empty-detail">
-            Chọn một từ trong transcript hoặc danh sách bên dưới.
-          </div>
-          <ol id="vocabulary-list" class="vocabulary-list"></ol>
-          <p class="dictionary-credit">
-            Nghĩa tiếng Anh từ CC-CEDICT · CC BY-SA 4.0
+          <p class="credits">
+            Nghĩa tiếng Việt: CVDICT · Tiếng Anh: CC-CEDICT (CC BY-SA 4.0) ·
+            Dịch câu: OPUS-MT chạy offline — bản dịch máy, có thể chưa chính xác.
           </p>
         </aside>
       </section>
     </main>
 
-    <template id="cue-template">
-      <li class="cue-row">
-        <button class="cue-time" type="button"></button>
-        <p class="cue-text" lang="zh"></p>
-      </li>
-    </template>
     <script type="module" src="/assets/app.js"></script>
   </body>
 </html>
