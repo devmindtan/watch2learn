@@ -111,11 +111,29 @@ def complete(job_id: str, result: dict) -> None:
             """
             UPDATE jobs
             SET status = 'complete', stage = 'complete', progress = 100,
-                result_json = ?, error = NULL, updated_at = ?
+                filename = COALESCE(?, filename), result_json = ?, error = NULL, updated_at = ?
             WHERE id = ?
             """,
-            (json.dumps(result, ensure_ascii=False), now(), job_id),
+            (result.get("filename"), json.dumps(result, ensure_ascii=False), now(), job_id),
         )
+
+
+def save_result(job_id: str, result: dict) -> None:
+    """Persist an enriched lesson (e.g. backfilled translations) without reordering."""
+    with connect() as connection:
+        connection.execute(
+            "UPDATE jobs SET result_json = ? WHERE id = ? AND status = 'complete'",
+            (json.dumps(result, ensure_ascii=False), job_id),
+        )
+
+
+def delete(job_id: str) -> bool:
+    initialize()
+    with connect() as connection:
+        cursor = connection.execute(
+            "DELETE FROM jobs WHERE id = ? AND status IN ('complete', 'failed')", (job_id,)
+        )
+    return cursor.rowcount > 0
 
 
 def fail(job_id: str, error: str) -> None:
@@ -148,7 +166,7 @@ def get(job_id: str) -> dict | None:
     return serialize(row) if row else None
 
 
-def recent_lessons(limit: int = 8) -> list[dict]:
+def recent_lessons(limit: int = 30) -> list[dict]:
     initialize()
     with connect() as connection:
         rows = connection.execute(
@@ -167,6 +185,7 @@ def recent_lessons(limit: int = 8) -> list[dict]:
                 **job,
                 "vocabulary_count": len(result.get("vocabulary", [])),
                 "transcript_method": result.get("transcript", {}).get("method"),
+                "source_kind": result.get("source", {}).get("kind", "file"),
             }
         )
     return lessons

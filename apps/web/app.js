@@ -5,6 +5,9 @@ const videoInput = $("#video-file");
 const subtitleInput = $("#subtitle-file");
 const dropzone = $("#dropzone");
 const videoName = $("#video-name");
+const youtubeUrl = $("#youtube-url");
+const youtubeRights = $("#youtube-rights");
+const sourceTabs = [...document.querySelectorAll("[data-source]")];
 const formNote = $("#form-note");
 const readiness = $("#readiness");
 const progressBox = $("#job-progress");
@@ -23,8 +26,10 @@ const pinyinToggle = $("#pinyin-toggle");
 const translationToggle = $("#translation-toggle");
 
 const video = $("#video");
+const youtubeHost = $("#youtube-host");
 const videoMissing = $("#video-missing");
 const reattachInput = $("#reattach-file");
+const sourceBar = $("#source-bar");
 const nowIndex = $("#now-index");
 const nowTime = $("#now-time");
 const nowText = $("#now-text");
@@ -48,7 +53,7 @@ const dictionaryNotice = $("#dictionary-notice");
 
 const state = {
   lesson: null,
-  videoUrl: null,
+  source: "file",
   activeCue: -1,
   selectedWord: null,
   selectedOccurrence: 0,
@@ -57,8 +62,11 @@ const state = {
   followTranscript: true,
   filter: "all",
   health: null,
+  preferYoutube: false,
+  download: null,
 };
 let followTimer = null;
+let downloadTimer = null;
 const wordsById = new Map();
 const cueIndexById = new Map();
 
@@ -112,12 +120,16 @@ function plain(text) {
   return (text || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d").toLowerCase();
 }
 
+function sizeLabel(bytes) {
+  return bytes > 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`;
+}
+
 async function responseJson(response) {
   let result = {};
   try {
     result = await response.json();
   } catch {
-    /* non-JSON error body */
+    /* empty or non-JSON body */
   }
   if (!response.ok) {
     const detail = Array.isArray(result.detail) ? "Dữ liệu gửi lên không hợp lệ." : result.detail;
@@ -141,7 +153,6 @@ function pickVoice() {
     voices.find((voice) => /^zh[-_]CN/i.test(voice.lang)) ||
     voices.find((voice) => /^(zh|cmn)/i.test(voice.lang)) ||
     null;
-  speakCueButton.disabled = !canSpeak;
   speakCueButton.title = chineseVoice
     ? `Đọc chậm bằng giọng máy (${chineseVoice.name})`
     : "Máy chưa có giọng đọc tiếng Trung — dùng “Nghe lại” để nghe giọng gốc trong video.";
@@ -165,17 +176,261 @@ if (canSpeak) {
   speakCueButton.title = "Trình duyệt không hỗ trợ đọc văn bản.";
 }
 
+/* ---------- Player: saved local file or YouTube embed ---------- */
+
+const player = { mode: null, yt: null, ytReady: false, ticker: null };
+let youtubeApi = null;
+
+function loadYoutubeApi() {
+  if (window.YT?.Player) return Promise.resolve(window.YT);
+  if (!youtubeApi) {
+    youtubeApi = new Promise((resolve, reject) => {
+      const previous = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => {
+        previous?.();
+        resolve(window.YT);
+      };
+      const script = document.createElement("script");
+      script.src = "https://www.youtube.com/iframe_api";
+      script.onerror = () => {
+        youtubeApi = null;
+        reject(new Error("Không tải được trình phát YouTube (cần kết nối mạng)."));
+      };
+      document.head.append(script);
+    });
+  }
+  return youtubeApi;
+}
+
+function stopTicker() {
+  window.clearInterval(player.ticker);
+  player.ticker = null;
+}
+
+function teardownPlayer() {
+  stopTicker();
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+  video.hidden = true;
+  if (player.yt) {
+    try {
+      player.yt.destroy();
+    } catch {
+      /* already gone */
+    }
+  }
+  player.yt = null;
+  player.ytReady = false;
+  youtubeHost.replaceChildren();
+  youtubeHost.hidden = true;
+  videoMissing.hidden = true;
+  player.mode = null;
+}
+
+function setPlayer(mode, options = {}) {
+  const resumeMs = state.activeCue >= 0 ? state.lesson.cues[state.activeCue].start_ms : 0;
+  teardownPlayer();
+  player.mode = mode;
+  if (mode === "file") {
+    video.src = options.url;
+    video.hidden = false;
+    if (resumeMs) {
+      video.addEventListener("loadedmetadata", () => (video.currentTime = resumeMs / 1000), { once: true });
+    }
+  } else if (mode === "youtube") {
+    youtubeHost.hidden = false;
+    const mount = element("div");
+    youtubeHost.append(mount);
+    loadYoutubeApi()
+      .then((YT) => {
+        if (player.mode !== "youtube" || !mount.isConnected) return;
+        player.yt = new YT.Player(mount, {
+          videoId: options.videoId,
+          host: "https://www.youtube-nocookie.com",
+          width: "100%",
+          height: "100%",
+          playerVars: { playsinline: 1, rel: 0, iv_load_policy: 3, start: Math.floor(resumeMs / 1000) },
+          events: {
+            onReady: () => {
+              player.ytReady = true;
+            },
+            onStateChange: (event) => {
+              stopTicker();
+              if (event.data === YT.PlayerState.PLAYING) player.ticker = window.setInterval(onTick, 150);
+              onTick();
+            },
+          },
+        });
+      })
+      .catch((error) => {
+        youtubeHost.replaceChildren(element("p", "player-error", error.message));
+      });
+  } else {
+    videoMissing.hidden = false;
+  }
+}
+
+function hasPlayer() {
+  return player.mode === "file" ? Boolean(video.src) : player.mode === "youtube" && player.ytReady;
+}
+
+function currentMs() {
+  if (player.mode === "file") return video.currentTime * 1000;
+  if (player.mode === "youtube" && player.ytReady) return player.yt.getCurrentTime() * 1000;
+  return 0;
+}
+
+function seekMs(milliseconds) {
+  if (player.mode === "file") video.currentTime = milliseconds / 1000;
+  else if (player.mode === "youtube" && player.ytReady) player.yt.seekTo(milliseconds / 1000, true);
+}
+
+function play() {
+  if (player.mode === "file") video.play().catch(() => {});
+  else if (player.mode === "youtube" && player.ytReady) player.yt.playVideo();
+}
+
+function pause() {
+  if (player.mode === "file") video.pause();
+  else if (player.mode === "youtube" && player.ytReady) player.yt.pauseVideo();
+}
+
+function isPaused() {
+  if (player.mode === "file") return video.paused;
+  if (player.mode === "youtube" && player.ytReady) {
+    const playing = [window.YT.PlayerState.PLAYING, window.YT.PlayerState.BUFFERING];
+    return !playing.includes(player.yt.getPlayerState());
+  }
+  return true;
+}
+
+function choosePlayer() {
+  const lesson = state.lesson;
+  const youtubeId = lesson.source?.kind === "youtube" ? lesson.source.video_id : null;
+  if (youtubeId && (state.preferYoutube || !lesson.media?.available)) setPlayer("youtube", { videoId: youtubeId });
+  else if (lesson.media?.available) setPlayer("file", { url: lesson.media.url });
+  else setPlayer(null);
+  renderSourceBar();
+}
+
+function renderSourceBar() {
+  const lesson = state.lesson;
+  const media = lesson.media || {};
+  const isYoutube = lesson.source?.kind === "youtube";
+  const parts = [];
+  if (isYoutube) {
+    const link = element("a", null, "YouTube");
+    link.href = lesson.source.url;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    parts.push(element("span", "source-kind", "Nguồn: "), link);
+    if (lesson.source.channel) parts.push(element("span", "muted", ` · ${lesson.source.channel}`));
+  }
+  if (media.available) {
+    const saved = element("span", "source-path");
+    saved.append("Đã lưu: ", element("code", null, media.path), ` (${sizeLabel(media.bytes)})`);
+    parts.push(saved);
+  }
+  const actions = element("span", "source-actions");
+  if (isYoutube && media.available) {
+    const watchingYoutube = player.mode === "youtube";
+    actions.append(
+      button("control-button", watchingYoutube ? "Xem bản đã tải" : "Xem trên YouTube", () => {
+        state.preferYoutube = !watchingYoutube;
+        choosePlayer();
+      }),
+    );
+  } else if (isYoutube) {
+    const download = state.download;
+    if (download?.status === "running") {
+      const progress = element("progress");
+      progress.max = 100;
+      progress.value = download.progress || 0;
+      actions.append(element("span", "muted", `Đang tải video… ${download.progress || 0}%`), progress);
+    } else {
+      if (download?.status === "failed") actions.append(element("span", "source-error", download.error || "Tải thất bại"));
+      actions.append(button("control-button", "⬇ Tải video về máy", startDownload));
+    }
+  } else if (!media.available) {
+    parts.push(element("span", "muted", "Chưa lưu video cho bài học này."));
+  }
+  sourceBar.replaceChildren(...parts, actions);
+}
+
+async function startDownload() {
+  const lessonId = state.lesson.id;
+  try {
+    state.download = await responseJson(await fetch(`/api/lessons/${lessonId}/download`, { method: "POST" }));
+  } catch (error) {
+    state.download = { status: "failed", error: error.message };
+  }
+  applyDownloadStatus(lessonId);
+}
+
+function applyDownloadStatus(lessonId) {
+  if (state.lesson?.id !== lessonId) return;
+  if (state.download?.status === "complete") {
+    state.lesson.media = state.download.media;
+    state.download = null;
+  }
+  renderSourceBar();
+  window.clearTimeout(downloadTimer);
+  if (state.download?.status !== "running") return;
+  downloadTimer = window.setTimeout(async () => {
+    try {
+      state.download = await responseJson(await fetch(`/api/lessons/${lessonId}/download`));
+    } catch (error) {
+      state.download = { status: "failed", error: error.message };
+    }
+    applyDownloadStatus(lessonId);
+  }, 1000);
+}
+
+async function resumeDownloadStatus(lessonId) {
+  try {
+    const status = await responseJson(await fetch(`/api/lessons/${lessonId}/download`));
+    if (status.status === "idle") return;
+    state.download = status;
+    applyDownloadStatus(lessonId);
+  } catch {
+    /* status is optional */
+  }
+}
+
+reattachInput.addEventListener("change", async () => {
+  const file = reattachInput.files[0];
+  if (!file) return;
+  reattachInput.value = "";
+  const body = new FormData();
+  body.append("video", file);
+  sourceBar.replaceChildren(element("span", "muted", "Đang lưu video vào thư mục bài học…"));
+  try {
+    state.lesson.media = await responseJson(
+      await fetch(`/api/lessons/${state.lesson.id}/media`, { method: "PUT", body }),
+    );
+  } catch (error) {
+    sourceBar.replaceChildren(element("span", "source-error", error.message));
+    return;
+  }
+  choosePlayer();
+});
+
 /* ---------- Library ---------- */
 
 const stageLabels = {
-  uploaded: "Đã nhận video",
+  uploaded: "Đã nhận yêu cầu",
   "probing-video": "Đang đọc cấu trúc video",
   "reading-subtitle": "Đang đọc phụ đề bạn cung cấp",
   "reading-embedded-subtitle": "Đang đọc phụ đề nhúng trong video",
+  "fetching-youtube": "Đang đọc thông tin video YouTube",
+  "reading-youtube-subtitle": "Đang tải phụ đề tiếng Trung của video",
+  "downloading-audio": "Đang tải âm thanh để nhận dạng",
   "extracting-audio": "Đang tách âm thanh",
   "transcribing-mandarin": "Đang nghe và nhận dạng tiếng Trung",
-  translating: "Đang dịch sang tiếng Việt",
+  translating: "Đang dịch từng câu sang tiếng Việt",
   "analyzing-vocabulary": "Đang tách từ và tra từ điển",
+  "saving-video": "Đang lưu video vào thư mục bài học",
   complete: "Bài học đã sẵn sàng",
 };
 
@@ -183,6 +438,7 @@ const methodLabels = {
   "faster-whisper": "nhận dạng giọng nói",
   "uploaded-subtitle": "phụ đề tải lên",
   "embedded-subtitle": "phụ đề trong video",
+  "youtube-subtitle": "phụ đề YouTube",
 };
 
 function setNote(text, isError = false) {
@@ -207,7 +463,7 @@ async function waitForJob(initialJob) {
   }
   showProgress(job);
   if (job.status === "failed") throw new Error(job.error || "Không thể xử lý video này.");
-  return job.result;
+  return job.id;
 }
 
 async function loadHealth() {
@@ -219,15 +475,14 @@ async function loadHealth() {
   }
   const items = [
     ["asr_model_ready", "Nhận dạng giọng nói", "pnpm setup:asr"],
-    ["dictionary_loaded", "Từ điển Trung–Anh", "pnpm setup:dictionary"],
     ["vietnamese_dictionary_loaded", "Từ điển Trung–Việt", "pnpm setup:dictionary"],
+    ["dictionary_loaded", "Cách đọc (CC-CEDICT)", "pnpm setup:dictionary"],
     ["translation_model_ready", "Dịch câu offline", "pnpm setup:translation"],
   ];
   readiness.replaceChildren(
     ...items.map(([key, label, command]) => {
       const ready = Boolean(state.health[key]);
-      const item = element("li", ready ? "" : "is-missing", ready ? label : `${label}: chạy ${command}`);
-      return item;
+      return element("li", ready ? "" : "is-missing", ready ? label : `${label}: chạy ${command}`);
     }),
   );
 }
@@ -242,11 +497,25 @@ async function loadRecentLessons() {
         const date = new Date(item.updated_at).toLocaleDateString("vi-VN");
         const method = methodLabels[item.transcript_method] || item.transcript_method || "";
         const open = button("recent-lesson", null, () => openSavedLesson(item.id));
+        const badges = element("span", "badges");
+        if (item.source_kind === "youtube") badges.append(element("span", "badge", "YouTube"));
+        if (item.has_media) badges.append(element("span", "badge badge-saved", "Đã lưu video"));
         open.append(
-          element("span", null, item.filename),
+          element("span", "recent-name", item.filename),
           element("small", null, `${item.vocabulary_count} từ · ${method} · ${date}`),
+          badges,
         );
-        row.append(open);
+        const remove = button("delete-button", "Xoá", async () => {
+          if (!window.confirm(`Xoá bài học “${item.filename}” và video đã lưu của nó?`)) return;
+          try {
+            await responseJson(await fetch(`/api/lessons/${item.id}`, { method: "DELETE" }));
+          } catch (error) {
+            setNote(error.message, true);
+          }
+          loadRecentLessons();
+        });
+        remove.setAttribute("aria-label", `Xoá bài học ${item.filename}`);
+        row.append(open, remove);
         return row;
       }),
     );
@@ -258,31 +527,18 @@ async function loadRecentLessons() {
 
 async function openSavedLesson(id) {
   try {
-    const lesson = await responseJson(await fetch(`/api/lessons/${encodeURIComponent(id)}`));
-    setVideoSource(null);
-    openLesson({ ...lesson, id });
+    openLesson(await responseJson(await fetch(`/api/lessons/${encodeURIComponent(id)}`)));
   } catch (error) {
     setNote(error.message, true);
     showLibrary();
   }
 }
 
-function setVideoSource(file) {
-  if (state.videoUrl) URL.revokeObjectURL(state.videoUrl);
-  state.videoUrl = file ? URL.createObjectURL(file) : null;
-  if (state.videoUrl) {
-    video.src = state.videoUrl;
-  } else {
-    video.removeAttribute("src");
-    video.load();
-  }
-  video.hidden = !state.videoUrl;
-  videoMissing.hidden = Boolean(state.videoUrl);
-}
-
 function showLibrary() {
-  video.pause();
+  teardownPlayer();
+  window.clearTimeout(downloadTimer);
   if (canSpeak) speechSynthesis.cancel();
+  state.lesson = null;
   workspace.hidden = true;
   library.hidden = false;
   libraryButton.hidden = true;
@@ -292,6 +548,18 @@ function showLibrary() {
   document.title = "Watch2Learn · Học tiếng Trung qua video";
   loadRecentLessons();
 }
+
+function selectSource(source) {
+  state.source = source;
+  sourceTabs.forEach((tab) => {
+    const selected = tab.dataset.source === source;
+    tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    $(`#${tab.getAttribute("aria-controls")}`).hidden = !selected;
+  });
+  setNote("");
+}
+sourceTabs.forEach((tab) => tab.addEventListener("click", () => selectSource(tab.dataset.source)));
 
 function selectVideoFile(file) {
   if (!file) return;
@@ -307,25 +575,38 @@ function updateVideoName() {
   dropzone.classList.toggle("has-file", Boolean(file));
 }
 
+async function submitLesson() {
+  if (state.source === "youtube") {
+    if (!youtubeUrl.value.trim()) throw new Error("Hãy dán link video YouTube.");
+    if (!youtubeRights.checked) throw new Error("Hãy xác nhận bạn có quyền sử dụng video này.");
+    setNote("Đang gửi link tới bộ xử lý trên máy này…");
+    return responseJson(
+      await fetch("/api/lessons/youtube", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: youtubeUrl.value.trim(), confirm_rights: true }),
+      }),
+    );
+  }
+  const mediaFile = videoInput.files[0];
+  if (!mediaFile) throw new Error("Hãy chọn một video hoặc file âm thanh.");
+  setNote("Đang gửi video tới bộ xử lý trên máy này…");
+  const body = new FormData();
+  body.append("video", mediaFile);
+  if (subtitleInput.files[0]) body.append("subtitle", subtitleInput.files[0]);
+  return responseJson(await fetch("/api/lessons/mandarin-video", { method: "POST", body }));
+}
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const mediaFile = videoInput.files[0];
-  const subtitleFile = subtitleInput.files[0];
-  if (!mediaFile) return;
   const submit = form.querySelector("button[type=submit]");
   submit.disabled = true;
-  setNote("Đang gửi video tới bộ xử lý trên máy này…");
-  showProgress({ progress: 0, stage: "uploaded" });
   try {
-    const body = new FormData();
-    body.append("video", mediaFile);
-    if (subtitleFile) body.append("subtitle", subtitleFile);
-    const job = await responseJson(await fetch("/api/lessons/mandarin-video", { method: "POST", body }));
-    const lesson = await waitForJob(job);
+    const job = await submitLesson();
+    const lessonId = await waitForJob(job);
     setNote("Bài học đã sẵn sàng và được lưu trên máy này.");
-    setVideoSource(mediaFile);
-    openLesson({ ...lesson, id: lesson.id || job.id });
     progressBox.hidden = true;
+    await openSavedLesson(lessonId);
   } catch (error) {
     setNote(error.message, true);
     progressBox.hidden = true;
@@ -349,14 +630,6 @@ dropzone.addEventListener("drop", (event) => {
   selectVideoFile(event.dataTransfer.files[0]);
 });
 
-reattachInput.addEventListener("change", () => {
-  const file = reattachInput.files[0];
-  if (!file) return;
-  setVideoSource(file);
-  reattachInput.value = "";
-  if (state.activeCue >= 0) video.currentTime = state.lesson.cues[state.activeCue].start_ms / 1000;
-});
-
 libraryButton.addEventListener("click", showLibrary);
 $(".brand").addEventListener("click", (event) => {
   if (!state.lesson) return;
@@ -367,11 +640,17 @@ $(".brand").addEventListener("click", (event) => {
 /* ---------- Lesson rendering ---------- */
 
 function openLesson(lesson) {
-  state.lesson = lesson;
-  state.activeCue = -1;
-  state.selectedWord = null;
-  state.loop = false;
-  state.clipEnd = null;
+  teardownPlayer();
+  window.clearTimeout(downloadTimer);
+  Object.assign(state, {
+    lesson,
+    activeCue: -1,
+    selectedWord: null,
+    loop: false,
+    clipEnd: null,
+    preferYoutube: false,
+    download: null,
+  });
   wordsById.clear();
   cueIndexById.clear();
   lesson.vocabulary.forEach((word) => wordsById.set(word.id, word));
@@ -384,23 +663,22 @@ function openLesson(lesson) {
   lessonTitle.hidden = false;
   lessonTitle.textContent = lesson.filename || "Bài học";
   document.title = `${lesson.filename || "Bài học"} · Watch2Learn`;
-  if (lesson.id) history.replaceState(null, "", `#lesson=${encodeURIComponent(lesson.id)}`);
+  history.replaceState(null, "", `#lesson=${encodeURIComponent(lesson.id)}`);
 
   loopButton.setAttribute("aria-pressed", "false");
   wordDetail.hidden = true;
   vocabSearch.value = "";
-  const missingDictionary = [
-    !lesson.dictionary?.loaded && "Trung–Anh (CC-CEDICT)",
-    !lesson.vietnamese_dictionary?.loaded && "Trung–Việt (CVDICT)",
-  ].filter(Boolean);
-  dictionaryNotice.hidden = missingDictionary.length === 0;
-  dictionaryNotice.textContent = `Chưa có từ điển offline ${missingDictionary.join(", ")}. Chạy pnpm setup:dictionary rồi mở lại bài học.`;
+  dictionaryNotice.hidden = Boolean(lesson.vietnamese_dictionary?.loaded);
+  dictionaryNotice.textContent =
+    "Chưa có từ điển Trung–Việt offline (CVDICT). Chạy pnpm setup:dictionary rồi mở lại bài học.";
 
   renderTranscript();
   renderVocabulary();
   selectTab(0);
   setActiveCue(0, { scroll: false });
   transcriptPanel.scrollTop = 0;
+  choosePlayer();
+  if (lesson.source?.kind === "youtube" && !lesson.media?.available) resumeDownloadStatus(lesson.id);
   backfillTranslations();
 }
 
@@ -432,7 +710,7 @@ function renderCueText(container, cue, { compact = false } = {}) {
 function translationText(cue) {
   if (cue.translation_vi) return cue.translation_vi;
   if (cue.translation_vi === "") return "";
-  return state.health?.translation_model_ready ? "Đang dịch…" : "";
+  return state.health?.translation_model_ready ? "Đang dịch theo câu…" : "";
 }
 
 function updateTranslationNode(node, cue) {
@@ -440,12 +718,16 @@ function updateTranslationNode(node, cue) {
   node.classList.toggle("is-pending", !cue.translation_vi);
 }
 
+function endsTranslationGroup(cue) {
+  return !cue.translation_group_end || cue.translation_group_end === cue.id;
+}
+
 function renderTranscript() {
   const cues = state.lesson.cues;
   cueCount.textContent = cues.length;
   transcript.replaceChildren(
     ...cues.map((cue, index) => {
-      const row = element("li", "cue-row");
+      const row = element("li", `cue-row${endsTranslationGroup(cue) ? "" : " continues"}`);
       row.dataset.index = index;
       const time = button("cue-time", timeLabel(cue.start_ms), () => playFromCue(index));
       time.setAttribute("aria-label", `Phát từ ${timeLabel(cue.start_ms)}`);
@@ -453,22 +735,17 @@ function renderTranscript() {
       const text = element("p", "cue-text");
       text.lang = "zh";
       renderCueText(text, cue, { compact: true });
-      const translation = element("p", "cue-translation translation");
-      translation.dataset.translationFor = cue.id;
-      updateTranslationNode(translation, cue);
-      body.append(text, translation);
+      body.append(text);
+      if (endsTranslationGroup(cue)) {
+        const translation = element("p", "cue-translation translation");
+        translation.dataset.translationFor = cue.id;
+        updateTranslationNode(translation, cue);
+        body.append(translation);
+      }
       row.append(time, body);
       return row;
     }),
   );
-}
-
-function firstMeaning(word) {
-  const own = ownMeanings[word.id];
-  if (own) return own;
-  const senses = cleanSenses(word.definitions_vi).senses;
-  if (senses.length) return senses[0];
-  return cleanSenses(word.definitions).senses[0] || "";
 }
 
 function cleanSenses(definitions = []) {
@@ -482,13 +759,39 @@ function cleanSenses(definitions = []) {
   return { senses, notes };
 }
 
+function firstMeaning(word) {
+  return ownMeanings[word.id] || cleanSenses(word.definitions_vi).senses[0] || "";
+}
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** The dictionary sense whose wording appears in this sentence's Vietnamese translation. */
+function contextSense(word, cue) {
+  const translation = (cue?.translation_vi || "").normalize("NFC").toLowerCase();
+  if (!translation) return null;
+  let best = null;
+  cleanSenses(word.definitions_vi).senses.forEach((sense, index) => {
+    for (const raw of sense.replace(/\([^)]*\)|\[[^\]]*]/g, "").split(/[;,/]/)) {
+      const phrase = raw.trim().normalize("NFC").toLowerCase();
+      if (phrase.length < 2) continue;
+      const pattern = new RegExp(`(^|[^\\p{L}])${escapeRegExp(phrase)}(?=$|[^\\p{L}])`, "u");
+      if (pattern.test(translation) && (!best || phrase.length > best.phrase.length)) {
+        best = { phrase, text: raw.trim(), index };
+      }
+    }
+  });
+  return best;
+}
+
 function matchesFilter(word, query) {
   const known = knownWords.has(word.id);
   if (state.filter === "known" && !known) return false;
   if (state.filter === "learning" && known) return false;
   if (!query) return true;
   const haystack = plain(
-    [word.word, word.traditional, word.pinyin, word.pinyin_numbered, ...(word.definitions_vi || []), ...word.definitions, ownMeanings[word.id]]
+    [word.word, word.traditional, word.pinyin, word.pinyin_numbered, ...(word.definitions_vi || []), ownMeanings[word.id]]
       .filter(Boolean)
       .join(" "),
   );
@@ -511,7 +814,10 @@ function renderVocabulary() {
       const hanzi = element("strong", null, word.word);
       hanzi.lang = "zh";
       const text = element("span", "word-row-text");
-      text.append(element("span", "word-row-pinyin", word.pinyin), element("span", "word-row-meaning", firstMeaning(word)));
+      text.append(
+        element("span", "word-row-pinyin", word.pinyin),
+        element("span", "word-row-meaning", firstMeaning(word) || "—"),
+      );
       row.append(hanzi, text, element("span", "frequency", `${word.occurrence_count}×`));
       const check = button("known-check", "✓", () => toggleKnown(word.id));
       check.setAttribute("aria-pressed", String(known));
@@ -550,6 +856,8 @@ function showWord(id, occurrenceIndex = 0, { keepScroll = false } = {}) {
   state.selectedWord = id;
   state.selectedOccurrence = Math.min(occurrenceIndex, word.occurrences.length - 1);
   const occurrence = word.occurrences[state.selectedOccurrence];
+  const cueIndex = cueIndexById.get(occurrence.cue_id);
+  const cue = state.lesson.cues[cueIndex];
   const known = knownWords.has(id);
 
   const head = element("div", "word-head");
@@ -562,12 +870,10 @@ function showWord(id, occurrenceIndex = 0, { keepScroll = false } = {}) {
     traditional.title = "Phồn thể";
     hanzi.append(traditional);
   }
-  const reading = occurrence.pinyin || word.pinyin;
-  identity.append(hanzi, element("p", "word-pinyin", reading));
+  identity.append(hanzi, element("p", "word-pinyin", occurrence.pinyin || word.pinyin));
   const actions = element("div", "word-actions");
   const speakButton = button("control-button", "🔈 Phát âm", () => speak(occurrence.surface || word.word, 0.7));
   speakButton.disabled = !canSpeak;
-  speakButton.title = speakCueButton.title.replace("Đọc chậm", "Phát âm");
   const knownButton = button("control-button known-button", known ? "✓ Đã biết" : "Đánh dấu đã biết", () => toggleKnown(id));
   knownButton.setAttribute("aria-pressed", String(known));
   const close = button("close-button", "×", closeWord);
@@ -576,38 +882,41 @@ function showWord(id, occurrenceIndex = 0, { keepScroll = false } = {}) {
   head.append(identity, actions);
 
   const meaning = element("div");
+  const inContext = contextSense(word, cue);
   if (ownMeanings[id]) meaning.append(element("p", "own-meaning", `Nghĩa của bạn: ${ownMeanings[id]}`));
+  if (inContext) {
+    const highlight = element("p", "context-sense");
+    highlight.append("Trong câu này: ", element("strong", null, inContext.text));
+    highlight.title = "Nghĩa khớp với bản dịch của câu";
+    meaning.append(highlight);
+  }
   const vietnamese = cleanSenses(word.definitions_vi);
-  const english = cleanSenses(word.definitions);
   if (vietnamese.senses.length) {
     const list = element("ol", "senses");
-    vietnamese.senses.forEach((sense) => list.append(element("li", null, sense)));
+    vietnamese.senses.forEach((sense, index) => {
+      list.append(element("li", inContext?.index === index ? "is-context" : "", sense));
+    });
     meaning.append(list);
   } else if (!ownMeanings[id]) {
-    meaning.append(element("p", "sense-note", "Chưa có nghĩa tiếng Việt trong từ điển offline cho từ này."));
+    meaning.append(
+      element("p", "sense-note", "Từ điển offline chưa có nghĩa tiếng Việt cho từ này — bạn có thể tự ghi nghĩa bên dưới."),
+    );
   }
-  const notes = vietnamese.notes.length ? vietnamese.notes : english.notes;
-  notes.forEach((note) => meaning.append(element("p", "sense-note", note)));
-  if (word.alternatives?.length) {
-    const details = element("details", "english");
-    details.append(element("summary", null, `Cách đọc / nghĩa khác (${word.alternatives.length})`));
+  vietnamese.notes.forEach((note) => meaning.append(element("p", "sense-note", note)));
+  const alternatives = (word.alternatives || []).filter((item) => item.definitions_vi?.length);
+  if (alternatives.length) {
+    const details = element("details", "more");
+    details.append(element("summary", null, `Cách đọc / nghĩa khác (${alternatives.length})`));
     const list = element("ul", "alternatives");
-    for (const alternative of word.alternatives) {
+    for (const alternative of alternatives) {
       const item = element("li");
-      const senses = alternative.definitions_vi?.length ? alternative.definitions_vi : alternative.definitions;
-      item.append(element("strong", "alt-pinyin", alternative.pinyin), ` ${senses.join("; ")}`);
+      item.append(element("strong", "alt-pinyin", alternative.pinyin), ` ${alternative.definitions_vi.join("; ")}`);
       list.append(item);
     }
     details.append(list);
     meaning.append(details);
   }
-  if (english.senses.length) {
-    const details = element("details", "english");
-    details.append(element("summary", null, "Nghĩa tiếng Anh (CC-CEDICT)"), element("p", null, english.senses.join("; ")));
-    meaning.append(details);
-  }
 
-  const cue = state.lesson.cues[cueIndexById.get(occurrence.cue_id)];
   const context = element("div", "context");
   if (occurrence.before_text) {
     const before = element("p", "context-neighbor", occurrence.before_text);
@@ -636,14 +945,25 @@ function showWord(id, occurrenceIndex = 0, { keepScroll = false } = {}) {
     context.append(after);
   }
   const contextActions = element("div", "context-actions");
-  const index = cueIndexById.get(occurrence.cue_id);
   contextActions.append(
-    button("control-button", "▶ Nghe câu này", () => playClip(index)),
+    button("control-button", "▶ Nghe câu này", () => playClip(cueIndex)),
     button("control-button", "🔈 Đọc chậm", () => speak(occurrence.cue_text)),
   );
-  if (word.occurrences.length > 1) {
+  if (word.occurrences.length > 8) {
+    const position = state.selectedOccurrence;
+    const previous = button("icon-button", "‹", () => showWord(id, position - 1, { keepScroll: true }));
+    previous.disabled = position === 0;
+    previous.setAttribute("aria-label", "Lần xuất hiện trước");
+    const next = button("icon-button", "›", () => showWord(id, position + 1, { keepScroll: true }));
+    next.disabled = position === word.occurrences.length - 1;
+    next.setAttribute("aria-label", "Lần xuất hiện sau");
+    const label = element("span", "occurrence-step", `Lần ${position + 1}/${word.occurrences.length} · ${timeLabel(occurrence.start_ms)}`);
+    contextActions.append(previous, label, next);
+  } else if (word.occurrences.length > 1) {
     word.occurrences.forEach((item, position) => {
-      const chip = button("occurrence-chip", `${position + 1} · ${timeLabel(item.start_ms)}`, () => showWord(id, position, { keepScroll: true }));
+      const chip = button("occurrence-chip", `${position + 1} · ${timeLabel(item.start_ms)}`, () =>
+        showWord(id, position, { keepScroll: true }),
+      );
       chip.setAttribute("aria-pressed", String(position === state.selectedOccurrence));
       chip.setAttribute("aria-label", `Lần xuất hiện ${position + 1} tại ${timeLabel(item.start_ms)}`);
       contextActions.append(chip);
@@ -667,7 +987,7 @@ function showWord(id, occurrenceIndex = 0, { keepScroll = false } = {}) {
 
   wordDetail.replaceChildren(
     head,
-    section("Nghĩa tiếng Việt", meaning),
+    section("Nghĩa", meaning),
     section(`Trong video · ${word.occurrence_count} lần`, context, contextActions),
     edit,
   );
@@ -683,10 +1003,6 @@ function closeWord() {
 }
 
 /* ---------- Playback ---------- */
-
-function hasVideo() {
-  return Boolean(state.videoUrl);
-}
 
 function setActiveCue(index, { scroll = true } = {}) {
   const cues = state.lesson?.cues || [];
@@ -717,14 +1033,14 @@ function setActiveCue(index, { scroll = true } = {}) {
 function seekTo(index) {
   const cue = state.lesson.cues[index];
   setActiveCue(index);
-  if (!hasVideo()) return false;
-  video.currentTime = cue.start_ms / 1000;
+  if (!hasPlayer()) return false;
+  seekMs(cue.start_ms);
   return true;
 }
 
 function playFromCue(index) {
   state.clipEnd = null;
-  if (seekTo(index)) video.play().catch(() => {});
+  if (seekTo(index)) play();
 }
 
 function playClip(index) {
@@ -734,12 +1050,12 @@ function playClip(index) {
     return;
   }
   state.clipEnd = state.loop ? null : state.lesson.cues[index].end_ms;
-  video.play().catch(() => {});
+  play();
 }
 
 function stepCue(offset) {
   const target = Math.min(Math.max(state.activeCue + offset, 0), state.lesson.cues.length - 1);
-  if (state.loop || !video.paused) playClip(target);
+  if (state.loop || !isPaused()) playClip(target);
   else seekTo(target);
 }
 
@@ -766,25 +1082,27 @@ function cueIndexAt(milliseconds) {
   return found;
 }
 
-video.addEventListener("timeupdate", () => {
-  if (!state.lesson) return;
-  const now = video.currentTime * 1000;
+function onTick() {
+  if (!state.lesson || !hasPlayer()) return;
+  const now = currentMs();
   const active = state.lesson.cues[state.activeCue];
-  if (state.loop && active && !video.paused && (now >= active.end_ms || now < active.start_ms - 300)) {
-    video.currentTime = active.start_ms / 1000;
+  if (state.loop && active && !isPaused() && (now >= active.end_ms || now < active.start_ms - 300)) {
+    seekMs(active.start_ms);
     return;
   }
   if (state.clipEnd !== null && now >= state.clipEnd - 80) {
     // Stop just inside the sentence so the active cue does not jump to the next one.
-    video.pause();
-    video.currentTime = Math.max(active?.start_ms ?? 0, state.clipEnd - 120) / 1000;
+    pause();
+    seekMs(Math.max(active?.start_ms ?? 0, state.clipEnd - 120));
     state.clipEnd = null;
     return;
   }
   if (state.loop) return;
   const index = cueIndexAt(now);
   if (index !== -1 && index !== state.activeCue) setActiveCue(index);
-});
+}
+
+video.addEventListener("timeupdate", onTick);
 video.addEventListener("seeking", () => {
   if (!state.loop && state.clipEnd !== null && video.currentTime * 1000 > state.clipEnd) state.clipEnd = null;
 });
@@ -806,34 +1124,31 @@ function pauseFollowing() {
 transcriptPanel.addEventListener("wheel", pauseFollowing, { passive: true });
 transcriptPanel.addEventListener("touchmove", pauseFollowing, { passive: true });
 
-/* ---------- Translations for lessons saved before offline translation ---------- */
+/* ---------- Sentence translations for lessons saved earlier ---------- */
 
 async function backfillTranslations() {
   const lesson = state.lesson;
   if (!state.health?.translation_model_ready) return;
-  const missing = lesson.cues.filter((cue) => cue.translation_vi === null || cue.translation_vi === undefined);
-  for (let start = 0; start < missing.length; start += 40) {
-    const batch = missing.slice(start, start + 40);
-    try {
-      const result = await responseJson(
-        await fetch("/api/translate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ texts: batch.map((cue) => cue.text.slice(0, 500)) }),
-        }),
-      );
-      if (state.lesson !== lesson) return;
-      batch.forEach((cue, index) => {
-        cue.translation_vi = result.translations[index] ?? "";
-        document.querySelectorAll(`[data-translation-for="${cue.id}"]`).forEach((node) => updateTranslationNode(node, cue));
-      });
-    } catch {
-      batch.forEach((cue) => {
-        cue.translation_vi = "";
-        document.querySelectorAll(`[data-translation-for="${cue.id}"]`).forEach((node) => updateTranslationNode(node, cue));
-      });
-    }
+  const complete = lesson.cues.every((cue) => typeof cue.translation_vi === "string");
+  if (lesson.translation?.unit === "sentence" && complete) return;
+  try {
+    const result = await responseJson(await fetch(`/api/lessons/${lesson.id}/translations`, { method: "POST" }));
+    lesson.translation = result.translation;
+    result.cues.forEach((row) => {
+      const cue = lesson.cues[cueIndexById.get(row.id)];
+      if (cue) Object.assign(cue, row);
+    });
+  } catch {
+    lesson.cues.forEach((cue) => {
+      if (typeof cue.translation_vi !== "string") cue.translation_vi = "";
+    });
   }
+  if (state.lesson !== lesson) return;
+  renderTranscript();
+  const active = state.activeCue;
+  state.activeCue = -1;
+  setActiveCue(active, { scroll: false });
+  if (state.selectedWord) showWord(state.selectedWord, state.selectedOccurrence, { keepScroll: true });
 }
 
 /* ---------- Tabs, filters, toggles, shortcuts ---------- */
@@ -888,11 +1203,11 @@ document.addEventListener("keydown", (event) => {
   const target = event.target;
   if (target.closest?.("input, textarea, select, [contenteditable='true'], video")) return;
   const key = event.key.toLowerCase();
-  if (key === " " && target.tagName !== "BUTTON" && target.tagName !== "SUMMARY") {
+  if (key === " " && !["BUTTON", "SUMMARY", "A"].includes(target.tagName)) {
     event.preventDefault();
-    if (!hasVideo()) return;
+    if (!hasPlayer()) return;
     state.clipEnd = null;
-    video.paused ? video.play().catch(() => {}) : video.pause();
+    isPaused() ? play() : pause();
   } else if (key === "arrowleft") {
     event.preventDefault();
     stepCue(-1);
@@ -917,5 +1232,9 @@ document.addEventListener("keydown", (event) => {
 applyPreferences();
 const healthReady = loadHealth();
 loadRecentLessons();
-const hashLesson = new URLSearchParams(location.hash.slice(1)).get("lesson");
-if (hashLesson) healthReady.then(() => openSavedLesson(hashLesson));
+function openFromHash() {
+  const lessonId = new URLSearchParams(location.hash.slice(1)).get("lesson");
+  if (lessonId && lessonId !== state.lesson?.id) healthReady.then(() => openSavedLesson(lessonId));
+}
+window.addEventListener("hashchange", openFromHash);
+openFromHash();

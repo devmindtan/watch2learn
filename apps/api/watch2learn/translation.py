@@ -1,6 +1,7 @@
 """Offline Chinese-to-Vietnamese sentence translation with a local OPUS-MT model."""
 
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 from threading import Lock
@@ -12,6 +13,13 @@ MAX_TEXT_CHARACTERS = 500
 BATCH_SIZE = 16
 SPECIAL_TOKENS = {"</s>", "<s>", "<pad>", "<unk>"}
 _LOCK = Lock()
+WRAPPED_RE = re.compile(r"^\s*[（(【\[]\s*(.+?)\s*[）)】\]]\s*$")
+MARKUP_RE = re.compile(r"\{\\[^}]*\}|<[^>]{1,40}>")
+
+
+def clean_output(text: str) -> str:
+    """Model output is untrusted: drop subtitle/HTML markup the model sometimes emits."""
+    return " ".join(MARKUP_RE.sub(" ", text).split())
 
 
 def model_path() -> Path:
@@ -58,11 +66,17 @@ def translate_to_vietnamese(texts: list[str]) -> list[str]:
     """Translate Chinese lines in order; blank input yields blank output."""
     translator, source, target = load_model()
     results = [""] * len(texts)
-    pending = [
-        (index, text.strip()[:MAX_TEXT_CHARACTERS])
-        for index, text in enumerate(texts)
-        if text and text.strip()
-    ]
+    pending = []
+    wrapped = set()
+    for index, text in enumerate(texts):
+        text = (text or "").strip()[:MAX_TEXT_CHARACTERS]
+        if not text:
+            continue
+        match = WRAPPED_RE.match(text)
+        if match:  # stage directions like （轻轻地哼着歌）: translate the inside only
+            wrapped.add(index)
+            text = match.group(1)
+        pending.append((index, text))
     for start in range(0, len(pending), BATCH_SIZE):
         batch = pending[start : start + BATCH_SIZE]
         tokens = [source.encode(text, out_type=str) + ["</s>"] for _, text in batch]
@@ -72,5 +86,65 @@ def translate_to_vietnamese(texts: list[str]) -> list[str]:
             )
         for (index, _), output in zip(batch, outputs, strict=True):
             pieces = [piece for piece in output.hypotheses[0] if piece not in SPECIAL_TOKENS]
-            results[index] = target.decode(pieces).strip()
+            result = clean_output(target.decode(pieces))
+            results[index] = f"({result.rstrip('.')})" if index in wrapped and result else result
     return results
+
+
+SENTENCE_END = tuple('。！？!?…；;」』”"）)】]')
+MAX_GROUP_GAP_MS = 700
+MAX_GROUP_CHARACTERS = 60
+MAX_GROUP_CUES = 3
+
+
+def sentence_groups(cues: list) -> list[list[int]]:
+    """Join cues that split one sentence so it is translated as a whole.
+
+    A cue continues into the next when it lacks closing punctuation, the pause is
+    short, and the joined text stays sentence-sized.
+    """
+    groups: list[list[int]] = []
+    current: list[int] = []
+    length = 0
+    for index, cue in enumerate(cues):
+        current.append(index)
+        length += len(cue.text)
+        following = cues[index + 1] if index + 1 < len(cues) else None
+        continues = (
+            following is not None
+            and not cue.text.rstrip().endswith(SENTENCE_END)
+            and following.start_ms - cue.end_ms <= MAX_GROUP_GAP_MS
+            and length + len(following.text) <= MAX_GROUP_CHARACTERS
+            and len(current) < MAX_GROUP_CUES
+        )
+        if not continues:
+            groups.append(current)
+            current, length = [], 0
+    return groups
+
+
+def join_cue_text(texts: list[str]) -> str:
+    joined = ""
+    for text in texts:
+        text = text.strip()
+        if joined and not joined.endswith(("，", ",", "、", "：", ":")):
+            joined += "，"
+        joined += text
+    return joined
+
+
+def translate_cues_in_context(cues: list) -> list[dict]:
+    """Per cue: the Vietnamese translation of the sentence it belongs to."""
+    groups = sentence_groups(cues)
+    sentences = translate_to_vietnamese(
+        [join_cue_text([cues[index].text for index in group]) for group in groups]
+    )
+    rows: list[dict] = [{} for _ in cues]
+    for group, sentence in zip(groups, sentences, strict=True):
+        for index in group:
+            rows[index] = {
+                "translation_vi": sentence,
+                "translation_group": cues[group[0]].id,
+                "translation_group_end": cues[group[-1]].id,
+            }
+    return rows

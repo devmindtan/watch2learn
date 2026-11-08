@@ -8,7 +8,8 @@ transitive licenses before pinning a production version.
 | Project | Role | License note | Decision |
 | --- | --- | --- | --- |
 | FFmpeg | media probing/extraction | LGPL/GPL depends on build flags | Use system binary; document build license |
-| yt-dlp | permitted URL metadata/captions | source distribution is Unlicense; bundled builds differ | Use Python/uv source install, subtitle-first |
+| yt-dlp (`yt-dlp[default]`, incl. `yt-dlp-ejs`) | permitted YouTube metadata, subtitles, audio, optional video download | Unlicense | Python/uv install (system 2024 builds can no longer read YouTube); needs a local JS runtime (Node or Deno); subtitle-first |
+| YouTube IFrame Player API | in-app playback of YouTube lessons | YouTube API Services terms; free, no key | Loaded only when a YouTube lesson is opened; `youtube-nocookie.com` host; local files never use it |
 | SYSTRAN/faster-whisper | local ASR | MIT | CPU int8 ASR adapter |
 | Systran/faster-whisper-small | multilingual model weights | MIT; about 484 MB | Explicit local download; Mandarin baseline |
 | PyAV 18.1.0 | bundled audio decoder used by faster-whisper | BSD-3-Clause; bundles FFmpeg libraries | Temporary compatibility pin; faster-whisper 1.2.1 breaks with PyAV 19 |

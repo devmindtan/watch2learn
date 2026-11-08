@@ -17,6 +17,7 @@ asr = [
   "ctranslate2>=4.6.0",
   "faster-whisper>=1.2.1",
   "sentencepiece>=0.2.0",
+  "yt-dlp[default]>=2026.10.26",
 ]
 dev = [
   "httpx>=0.28.1",

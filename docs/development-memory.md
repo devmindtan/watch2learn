@@ -96,3 +96,25 @@ a defect that escaped a completed check, or a manual task repeated at least twic
   the dictionary entry whose reading matches, and keep the other entries as
   learner-visible alternatives.
 - Verification: `test_polyphonic_word_uses_sentence_reading_and_keeps_alternatives`.
+
+## 2026-11-08 — subtitle lines were translated without their sentence
+
+- Evidence: the learner asked for contextual (not word-for-word) translation;
+  "我昨天去了一家 / 很有名的餐厅" translated per line gave "…một gia đình" (wrong),
+  joined gave "Hôm qua tôi đến một nhà hàng nổi tiếng."
+- Root cause: OPUS-MT received each subtitle cue in isolation, so a sentence split
+  across cues lost its object/meaning.
+- Reusable rule: translate sentence groups (see `translation.sentence_groups`),
+  treat closing brackets as sentence ends, strip model markup, and show the word
+  sense that appears in the sentence translation.
+- Verification: `test_cues_split_mid_sentence_are_translated_together`,
+  `test_bracketed_stage_direction_translates_inner_text`.
+
+## 2026-11-08 — analysed videos were deleted after processing
+
+- Evidence: the learner expected the analysed video to stay in a folder; saved
+  lessons could not play without re-selecting the file.
+- Root cause: the job cleanup removed the whole work directory, source included.
+- Reusable rule: move the analysed source to `data/media/<lesson-id>/` before job
+  cleanup; delete it only with the lesson.
+- Verification: `test_uploaded_video_is_kept_in_lesson_media_folder`.

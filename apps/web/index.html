@@ -34,16 +34,36 @@
       <section id="library" class="library" aria-label="Thư viện bài học">
         <form id="lesson-form" class="card import-card">
           <h1>Tạo bài học mới</h1>
-          <label class="dropzone" id="dropzone">
-            <input id="video-file" type="file" accept="video/*,audio/*" required />
-            <span class="dropzone-icon" aria-hidden="true">▶</span>
-            <strong id="video-name">Chọn hoặc kéo thả video tiếng Trung</strong>
-            <small>MP4, MKV, MOV, WEBM hoặc file âm thanh · xử lý ngay trên máy</small>
-          </label>
-          <details class="subtitle-option">
-            <summary>Đã có phụ đề tiếng Trung? <small>(tùy chọn, nhanh hơn)</small></summary>
-            <input id="subtitle-file" type="file" accept=".srt,.vtt,text/vtt" />
-          </details>
+          <div class="source-switch" role="tablist" aria-label="Nguồn video">
+            <button type="button" role="tab" data-source="file" aria-selected="true" aria-controls="file-source">Video trên máy</button>
+            <button type="button" role="tab" data-source="youtube" aria-selected="false" aria-controls="youtube-source" tabindex="-1">Link YouTube</button>
+          </div>
+          <div id="file-source" role="tabpanel">
+            <label class="dropzone" id="dropzone">
+              <input id="video-file" type="file" accept="video/*,audio/*" />
+              <span class="dropzone-icon" aria-hidden="true">▶</span>
+              <strong id="video-name">Chọn hoặc kéo thả video tiếng Trung</strong>
+              <small>MP4, MKV, MOV, WEBM hoặc file âm thanh · video được lưu vào thư mục bài học</small>
+            </label>
+            <details class="subtitle-option">
+              <summary>Đã có phụ đề tiếng Trung? <small>(tùy chọn, nhanh hơn)</small></summary>
+              <input id="subtitle-file" type="file" accept=".srt,.vtt,text/vtt" />
+            </details>
+          </div>
+          <div id="youtube-source" class="youtube-source" role="tabpanel" hidden>
+            <label class="field">
+              <span>Link video YouTube</span>
+              <input id="youtube-url" type="url" inputmode="url" autocomplete="off" placeholder="https://www.youtube.com/watch?v=…" />
+            </label>
+            <label class="check">
+              <input id="youtube-rights" type="checkbox" />
+              <span>Tôi có quyền sử dụng video này (video của tôi, có giấy phép, hoặc chủ sở hữu cho phép tải về).</span>
+            </label>
+            <p class="hint">
+              Xem trực tiếp trên YouTube. Nếu người đăng có phụ đề tiếng Trung thì dùng luôn;
+              nếu không, máy tải phần âm thanh về để tự nhận dạng. Có thể tải video về máy trong bài học.
+            </p>
+          </div>
           <button class="primary-button" type="submit">Tạo bài học</button>
           <div id="job-progress" class="job-progress" hidden>
             <div>
@@ -66,15 +86,17 @@
       <section id="workspace" class="workspace" hidden>
         <div class="stage">
           <div class="player-shell">
-            <video id="video" controls preload="metadata" playsinline></video>
+            <video id="video" controls preload="metadata" playsinline hidden></video>
+            <div id="youtube-host" class="youtube-host" hidden></div>
             <div id="video-missing" class="video-missing" hidden>
-              <p>Bài học đã lưu, nhưng video gốc không được giữ lại trên máy chủ.</p>
+              <p>Bài học này được tạo trước khi app lưu video. Chọn lại video gốc để lưu vào thư mục bài học.</p>
               <label class="secondary-button">
-                Chọn lại video gốc để phát
+                Chọn video gốc
                 <input id="reattach-file" type="file" accept="video/*,audio/*" />
               </label>
             </div>
           </div>
+          <div id="source-bar" class="source-bar" aria-live="polite"></div>
 
           <section class="now-card" aria-label="Câu đang học">
             <div class="now-toolbar">
@@ -132,8 +154,8 @@
             <p id="vocab-empty" class="muted" hidden>Không có từ nào khớp.</p>
           </div>
           <p class="credits">
-            Nghĩa tiếng Việt: CVDICT · Tiếng Anh: CC-CEDICT (CC BY-SA 4.0) ·
-            Dịch câu: OPUS-MT chạy offline — bản dịch máy, có thể chưa chính xác.
+            Nghĩa: CVDICT · Cách đọc: CC-CEDICT + pypinyin (CC BY-SA 4.0) ·
+            Dịch câu: OPUS-MT chạy offline theo từng câu — bản dịch máy, có thể chưa chính xác.
           </p>
         </aside>
       </section>

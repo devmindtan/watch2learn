@@ -40,10 +40,24 @@ UI state or reuse exceeds what the small native client can keep clear.
 Video jobs are fingerprinted and processed in a local worker thread so long ASR
 does not hold the browser request open. SQLite stores observable job state and the
 completed lesson. Re-uploading the same video/settings reuses the completed result.
-Raw video and derived audio live only in the per-job temporary directory and are
-deleted after success or failure. If the local server stops mid-job, startup reads
-the durable record and resumes processing from the retained source; unrelated
-orphan job directories are removed.
+Derived audio and intermediate files live only in the per-job temporary directory
+and are deleted after success or failure. The analysed source video is moved to
+`data/media/<lesson-id>/video.<ext>` (ignored by Git) so a saved lesson can replay
+its exact moments; it is served by `GET /api/lessons/{id}/media` with HTTP range
+support and deleted together with the lesson (`DELETE /api/lessons/{id}`). Lessons
+saved before this rule can attach their video with `PUT /api/lessons/{id}/media`.
+If the local server stops mid-job, startup reads the durable record and resumes
+processing from the retained source; unrelated orphan job directories are removed.
+
+YouTube lessons (`POST /api/lessons/youtube`) require the learner to confirm they
+may use the video. Only a validated 11-character video ID reaches yt-dlp (argument
+arrays, `--ignore-config`, no playlists, live streams and >3 h videos rejected).
+The pipeline prefers uploader-provided Chinese subtitles, ignores auto-captions
+(they include machine translations), and otherwise downloads audio only for local
+ASR. The browser plays the lesson through the YouTube IFrame player
+(`youtube-nocookie.com`). `POST /api/lessons/{id}/download` saves a ≤720p MP4
+(H.264 preferred) into the lesson media folder; the player then offers the local
+copy.
 
 Do not add Redis, Kafka, Kubernetes, a vector database, microservices, or a cloud
 object store until measured requirements make the local design insufficient.
@@ -59,10 +73,17 @@ object store until measured requirements make the local design insufficient.
 - `lessons`: combines occurrences, definitions, learner-known state, and ranking.
 - `review`: owns saved vocabulary and scheduling; it does not mutate transcripts.
 
-Each cue carries `translation_vi` (or `null` when the optional model is missing)
-and the lesson records translation provenance. `POST /api/translate` translates up
-to 100 lines for lessons saved before translation was installed; the browser uses
-it only to fill missing cue translations. Pinyin is chosen per occurrence: the
+Translation works on sentences, not subtitle lines: consecutive cues are joined
+when a cue lacks closing punctuation, the pause is ≤700 ms and the sentence stays
+≤60 characters (max 3 cues). Each cue carries the sentence's `translation_vi`
+plus `translation_group`/`translation_group_end` (or `null` when the optional
+model is missing); the lesson records `translation.unit = "sentence"`. Bracketed
+stage directions are translated from their inner text and model markup is
+stripped. `POST /api/lessons/{id}/translations` re-translates and persists older
+lessons. The word card shows "Trong câu này" — the CVDICT sense whose wording
+appears in that sentence's translation — instead of an isolated definition. Only
+Vietnamese meanings are shown; CC-CEDICT is still used for readings and sense
+selection. Pinyin is chosen per occurrence: the
 whole cue is read by pypinyin, and the dictionary entry whose reading matches is
 selected, so polyphonic words (更 gèng/gēng, 行 xíng/háng) get the sense used in
 that sentence; other readings stay available as `alternatives`.

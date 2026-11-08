@@ -147,7 +147,7 @@ def build_lesson(
     cues: list[Cue],
     dictionary: Cedict,
     vietnamese: Cedict | None = None,
-    translations: list[str] | None = None,
+    translations: list[dict] | None = None,
     translation_provenance: dict | None = None,
 ) -> dict:
     occurrences: dict[str, list[dict]] = defaultdict(list)
@@ -165,7 +165,7 @@ def build_lesson(
                 "start_ms": cue.start_ms,
                 "end_ms": cue.end_ms,
                 "text": cue.text,
-                "translation_vi": translations[index] if translations else None,
+                **(translations[index] if translations else {"translation_vi": None}),
                 "segments": segments,
             }
         )

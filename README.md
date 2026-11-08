@@ -39,9 +39,11 @@ pnpm setup                          # one-time local tool/model/dictionary/trans
 pnpm dev
 ```
 
-Open <http://127.0.0.1:8000> and choose a local Mandarin video. A subtitle file is
-optional. Processing runs as a local background job, completed lessons are saved,
-and temporary media/audio files are deleted after the lesson is built.
+Open <http://127.0.0.1:8000> and choose a local Mandarin video, or paste a YouTube
+link for a video you are allowed to use. A subtitle file is optional. Processing
+runs as a local background job; the analysed video is kept in
+`data/media/<lesson-id>/` and temporary audio files are deleted. YouTube lessons
+play through the YouTube player and can download the video into the same folder.
 
 Run checks with:
 

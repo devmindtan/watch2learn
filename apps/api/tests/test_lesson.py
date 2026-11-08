@@ -46,7 +46,7 @@ def test_vietnamese_meanings_follow_english_reading_and_cue_translations_align()
         [Cue("cue-1", 0, 1000, "行。"), Cue("cue-2", 1000, 2000, "好。")],
         english,
         vietnamese,
-        ["Được.", "Tốt."],
+        [{"translation_vi": "Được."}, {"translation_vi": "Tốt."}],
         {"target_language": "vi", "available": True, "method": "machine-translation"},
     )
     word = next(item for item in lesson["vocabulary"] if item["word"] == "行")
