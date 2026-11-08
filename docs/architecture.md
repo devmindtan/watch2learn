@@ -61,6 +61,11 @@ which creates a separate ASR lesson. The browser plays the lesson through the Yo
 (H.264 preferred) into the lesson media folder; the player then offers the local
 copy.
 
+The UI in `apps/web` is static (`index.html` + `assets/`, relative paths) and can
+be served by the backend or published separately; `assets/api.js` prefixes every
+request with the configured backend URL and bearer token. Remote access, token
+handling, signed media URLs and CORS are described in `docs/remote-access.md`.
+
 Do not add Redis, Kafka, Kubernetes, a vector database, microservices, or a cloud
 object store until measured requirements make the local design insufficient.
 

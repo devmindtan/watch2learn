@@ -45,6 +45,10 @@ runs as a local background job; the analysed video is kept in
 `data/media/<lesson-id>/` and temporary audio files are deleted. YouTube lessons
 play through the YouTube player and can download the video into the same folder.
 
+To use it from other devices without paying for a server, publish the static UI
+and expose your machine's backend with an access token: see
+[docs/remote-access.md](docs/remote-access.md).
+
 Run checks with:
 
 ```bash

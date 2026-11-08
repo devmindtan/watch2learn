@@ -5,6 +5,8 @@ import re
 import shutil
 from pathlib import Path
 
+from .security import signed_url
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 MEDIA_ROOT = PROJECT_ROOT / "data" / "media"
 LESSON_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -61,7 +63,7 @@ def media_info(lesson_id: str) -> dict:
         return {"available": False}
     return {
         "available": True,
-        "url": f"/api/lessons/{lesson_id}/media",
+        "url": signed_url(f"/api/lessons/{lesson_id}/media"),
         "path": str(path.relative_to(PROJECT_ROOT)),
         "bytes": path.stat().st_size,
     }

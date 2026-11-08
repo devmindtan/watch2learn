@@ -13,12 +13,13 @@ from pathlib import Path
 from threading import Lock
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import jobs, storage, translation, youtube
+from . import jobs, security, storage, translation, youtube
 from .asr import model_ready, transcribe_mandarin
 from .dictionary import load_cedict, load_vietnamese
 from .lesson import (
@@ -65,8 +66,30 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Watch2Learn", version="0.3.0", lifespan=lifespan)
-app.mount("/assets", StaticFiles(directory=WEB_ROOT), name="assets")
+app = FastAPI(title="Watch2Learn", version="0.4.0", lifespan=lifespan)
+app.mount("/assets", StaticFiles(directory=WEB_ROOT / "assets"), name="assets")
+
+
+@app.middleware("http")
+async def require_access_token(request: Request, call_next):
+    if not security.request_allowed(
+        request.method, request.url.path, request.headers, request.query_params
+    ):
+        return JSONResponse(
+            {"detail": "Cần mã truy cập hợp lệ để dùng máy chủ này."}, status_code=401
+        )
+    return await call_next(request)
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=security.allowed_origins(),
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
+    allow_private_network=True,  # a public HTTPS page may call this machine
+    max_age=600,
+)
 
 
 def cleanup_abandoned_job_files() -> None:
@@ -115,10 +138,16 @@ async def index() -> FileResponse:
 
 
 @app.get("/api/health")
-async def health() -> dict:
+async def health(request: Request) -> dict:
+    token = security.access_token()
+    authorized = not token or security.bearer_matches(token, request.headers.get("authorization"))
+    if not authorized:
+        return {"status": "ok", "auth_required": True, "authorized": False}
     dictionary = load_cedict()
     return {
         "status": "ok",
+        "auth_required": bool(token),
+        "authorized": True,
         "dictionary_loaded": dictionary.source is not None,
         "vietnamese_dictionary_loaded": load_vietnamese().source is not None,
         "asr_model_ready": model_ready(),

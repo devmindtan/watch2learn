@@ -1,3 +1,5 @@
+import { apiFetch, apiUrl, onUnauthorized, responseJson, saveServerSettings, serverSettings } from "./api.js";
+
 const $ = (selector) => document.querySelector(selector);
 
 const form = $("#lesson-form");
@@ -124,20 +126,6 @@ function sizeLabel(bytes) {
   return bytes > 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1e6))} MB`;
 }
 
-async function responseJson(response) {
-  let result = {};
-  try {
-    result = await response.json();
-  } catch {
-    /* empty or non-JSON body */
-  }
-  if (!response.ok) {
-    const detail = Array.isArray(result.detail) ? "Dữ liệu gửi lên không hợp lệ." : result.detail;
-    throw new Error(detail || `Yêu cầu không thành công (${response.status}).`);
-  }
-  return result;
-}
-
 const delay = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
 /* ---------- Speech (offline browser/OS voices) ---------- */
@@ -233,7 +221,7 @@ function setPlayer(mode, options = {}) {
   teardownPlayer();
   player.mode = mode;
   if (mode === "file") {
-    video.src = options.url;
+    video.src = apiUrl(options.url);
     video.hidden = false;
     if (resumeMs) {
       video.addEventListener("loadedmetadata", () => (video.currentTime = resumeMs / 1000), { once: true });
@@ -374,7 +362,7 @@ async function startRelisten() {
   renderSourceBar();
   try {
     let job = await responseJson(
-      await fetch("/api/lessons/youtube", {
+      await apiFetch("/api/lessons/youtube", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: lesson.source.url, confirm_rights: true, transcript: "asr" }),
@@ -382,7 +370,7 @@ async function startRelisten() {
     );
     while (job.status === "queued" || job.status === "processing") {
       await delay(1000);
-      job = await responseJson(await fetch(`/api/jobs/${job.id}`));
+      job = await responseJson(await apiFetch(`/api/jobs/${job.id}`));
       if (state.lesson !== lesson) return;
       state.relisten = { status: "running", progress: job.progress };
       renderSourceBar();
@@ -399,7 +387,7 @@ async function startRelisten() {
 async function startDownload() {
   const lessonId = state.lesson.id;
   try {
-    state.download = await responseJson(await fetch(`/api/lessons/${lessonId}/download`, { method: "POST" }));
+    state.download = await responseJson(await apiFetch(`/api/lessons/${lessonId}/download`, { method: "POST" }));
   } catch (error) {
     state.download = { status: "failed", error: error.message };
   }
@@ -417,7 +405,7 @@ function applyDownloadStatus(lessonId) {
   if (state.download?.status !== "running") return;
   downloadTimer = window.setTimeout(async () => {
     try {
-      state.download = await responseJson(await fetch(`/api/lessons/${lessonId}/download`));
+      state.download = await responseJson(await apiFetch(`/api/lessons/${lessonId}/download`));
     } catch (error) {
       state.download = { status: "failed", error: error.message };
     }
@@ -427,7 +415,7 @@ function applyDownloadStatus(lessonId) {
 
 async function resumeDownloadStatus(lessonId) {
   try {
-    const status = await responseJson(await fetch(`/api/lessons/${lessonId}/download`));
+    const status = await responseJson(await apiFetch(`/api/lessons/${lessonId}/download`));
     if (status.status === "idle") return;
     state.download = status;
     applyDownloadStatus(lessonId);
@@ -445,7 +433,7 @@ reattachInput.addEventListener("change", async () => {
   sourceBar.replaceChildren(element("span", "muted", "Đang lưu video vào thư mục bài học…"));
   try {
     state.lesson.media = await responseJson(
-      await fetch(`/api/lessons/${state.lesson.id}/media`, { method: "PUT", body }),
+      await apiFetch(`/api/lessons/${state.lesson.id}/media`, { method: "PUT", body }),
     );
   } catch (error) {
     sourceBar.replaceChildren(element("span", "source-error", error.message));
@@ -497,18 +485,79 @@ async function waitForJob(initialJob) {
   while (job.status === "queued" || job.status === "processing") {
     showProgress(job);
     await delay(800);
-    job = await responseJson(await fetch(`/api/jobs/${job.id}`));
+    job = await responseJson(await apiFetch(`/api/jobs/${job.id}`));
   }
   showProgress(job);
   if (job.status === "failed") throw new Error(job.error || "Không thể xử lý video này.");
   return job.id;
 }
 
-async function loadHealth() {
+const serverButton = $("#server-button");
+const serverLabel = $("#server-label");
+const serverDialog = $("#server-dialog");
+const serverBase = $("#server-base");
+const serverToken = $("#server-token");
+const serverStatus = $("#server-status");
+
+function setServerState(kind, label) {
+  serverButton.dataset.state = kind;
+  serverLabel.textContent = label;
+}
+
+function openServerDialog(message = "") {
+  const current = serverSettings();
+  serverBase.value = current.base;
+  serverToken.value = current.token;
+  serverStatus.textContent = message;
+  if (!serverDialog.open) serverDialog.showModal();
+}
+
+async function checkServer() {
   try {
-    state.health = await responseJson(await fetch("/api/health"));
+    const health = await responseJson(await apiFetch("/api/health"));
+    if (health.auth_required && !health.authorized) {
+      setServerState("auth", "Cần mã truy cập");
+      return { health: null, message: "Máy chủ yêu cầu mã truy cập (chạy pnpm remote:token trên máy chủ để xem)." };
+    }
+    setServerState("ok", serverSettings().base ? new URL(serverSettings().base).host : "Máy này");
+    return { health, message: "" };
   } catch {
-    state.health = null;
+    setServerState("offline", "Mất kết nối");
+    const hint = serverSettings().base
+      ? "Không kết nối được máy chủ. Máy của bạn có đang bật và chạy pnpm dev không?"
+      : "Trang này không chạy cùng máy chủ. Hãy nhập địa chỉ backend trên máy của bạn.";
+    return { health: null, message: hint };
+  }
+}
+
+serverButton.addEventListener("click", () => openServerDialog());
+onUnauthorized(() => {
+  setServerState("auth", "Cần mã truy cập");
+  openServerDialog("Mã truy cập không đúng hoặc chưa nhập.");
+});
+serverDialog.addEventListener("close", async () => {
+  if (serverDialog.returnValue !== "save") return;
+  saveServerSettings({ base: serverBase.value, token: serverToken.value });
+  await loadHealth();
+  if (state.health) {
+    loadRecentLessons();
+    openFromHash();
+  }
+});
+$("#server-test").addEventListener("click", async () => {
+  const previous = serverSettings();
+  saveServerSettings({ base: serverBase.value, token: serverToken.value });
+  serverStatus.textContent = "Đang kiểm tra…";
+  const { health, message } = await checkServer();
+  serverStatus.textContent = health ? "Kết nối thành công." : message;
+  if (!health) saveServerSettings(previous);
+});
+
+async function loadHealth() {
+  const { health, message } = await checkServer();
+  state.health = health;
+  if (!health) {
+    openServerDialog(message);
     return;
   }
   const items = [
@@ -527,7 +576,7 @@ async function loadHealth() {
 
 async function loadRecentLessons() {
   try {
-    const lessons = await responseJson(await fetch("/api/lessons"));
+    const lessons = await responseJson(await apiFetch("/api/lessons"));
     recentEmpty.hidden = lessons.length > 0;
     recentList.replaceChildren(
       ...lessons.map((item) => {
@@ -546,7 +595,7 @@ async function loadRecentLessons() {
         const remove = button("delete-button", "Xoá", async () => {
           if (!window.confirm(`Xoá bài học “${item.filename}” và video đã lưu của nó?`)) return;
           try {
-            await responseJson(await fetch(`/api/lessons/${item.id}`, { method: "DELETE" }));
+            await responseJson(await apiFetch(`/api/lessons/${item.id}`, { method: "DELETE" }));
           } catch (error) {
             setNote(error.message, true);
           }
@@ -565,7 +614,7 @@ async function loadRecentLessons() {
 
 async function openSavedLesson(id) {
   try {
-    openLesson(await responseJson(await fetch(`/api/lessons/${encodeURIComponent(id)}`)));
+    openLesson(await responseJson(await apiFetch(`/api/lessons/${encodeURIComponent(id)}`)));
   } catch (error) {
     setNote(error.message, true);
     showLibrary();
@@ -619,7 +668,7 @@ async function submitLesson() {
     if (!youtubeRights.checked) throw new Error("Hãy xác nhận bạn có quyền sử dụng video này.");
     setNote("Đang gửi link tới bộ xử lý trên máy này…");
     return responseJson(
-      await fetch("/api/lessons/youtube", {
+      await apiFetch("/api/lessons/youtube", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -636,7 +685,7 @@ async function submitLesson() {
   const body = new FormData();
   body.append("video", mediaFile);
   if (subtitleInput.files[0]) body.append("subtitle", subtitleInput.files[0]);
-  return responseJson(await fetch("/api/lessons/mandarin-video", { method: "POST", body }));
+  return responseJson(await apiFetch("/api/lessons/mandarin-video", { method: "POST", body }));
 }
 
 form.addEventListener("submit", async (event) => {
@@ -1179,7 +1228,7 @@ async function backfillTranslations() {
   const complete = lesson.cues.every((cue) => typeof cue.translation_vi === "string");
   if (lesson.translation?.unit === state.health.translation_unit && complete) return;
   try {
-    const result = await responseJson(await fetch(`/api/lessons/${lesson.id}/translations`, { method: "POST" }));
+    const result = await responseJson(await apiFetch(`/api/lessons/${lesson.id}/translations`, { method: "POST" }));
     lesson.translation = result.translation;
     result.cues.forEach((row) => {
       const cue = lesson.cues[cueIndexById.get(row.id)];
@@ -1277,11 +1326,14 @@ document.addEventListener("keydown", (event) => {
 /* ---------- Start ---------- */
 
 applyPreferences();
-const healthReady = loadHealth();
-loadRecentLessons();
 function openFromHash() {
+  if (!state.health) return;
   const lessonId = new URLSearchParams(location.hash.slice(1)).get("lesson");
-  if (lessonId && lessonId !== state.lesson?.id) healthReady.then(() => openSavedLesson(lessonId));
+  if (lessonId && lessonId !== state.lesson?.id) openSavedLesson(lessonId);
 }
 window.addEventListener("hashchange", openFromHash);
-openFromHash();
+loadHealth().then(() => {
+  if (!state.health) return;
+  loadRecentLessons();
+  openFromHash();
+});

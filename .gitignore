@@ -32,3 +32,4 @@ data/dictionaries/*
 data/jobs/
 *.part
 *.tmp
+data/access-token

@@ -5,12 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Học từ vựng tiếng Trung trong đúng ngữ cảnh video." />
     <title>Watch2Learn · Học tiếng Trung qua video</title>
-    <link rel="icon" href="/assets/favicon.svg" />
-    <link rel="stylesheet" href="/assets/styles.css" />
+    <link rel="icon" href="assets/favicon.svg" />
+    <link rel="stylesheet" href="assets/styles.css" />
   </head>
   <body>
     <header class="topbar">
-      <a class="brand" href="/" aria-label="Watch2Learn – thư viện">
+      <a class="brand" href="./" aria-label="Watch2Learn – thư viện">
         <span class="brand-mark" aria-hidden="true">文</span>
         <span class="brand-name">Watch2Learn</span>
       </a>
@@ -18,6 +18,9 @@
         <span aria-hidden="true">←</span> Thư viện
       </button>
       <p id="lesson-title" class="lesson-title" hidden></p>
+      <button id="server-button" class="server-button" type="button" data-state="checking" title="Kết nối máy chủ">
+        <span class="server-dot" aria-hidden="true"></span><span id="server-label">Đang kết nối…</span>
+      </button>
       <div id="view-toggles" class="view-toggles" hidden>
         <label class="toggle">
           <input id="pinyin-toggle" type="checkbox" checked />
@@ -29,6 +32,30 @@
         </label>
       </div>
     </header>
+
+    <dialog id="server-dialog" class="server-dialog" aria-labelledby="server-title">
+      <form method="dialog">
+        <h2 id="server-title">Kết nối máy chủ</h2>
+        <p class="muted">
+          Giao diện này lấy dữ liệu từ máy của bạn. Để trống địa chỉ nếu bạn đang mở trang trực tiếp
+          từ máy chủ (ví dụ <code>http://127.0.0.1:8000</code>).
+        </p>
+        <label class="field">
+          <span>Địa chỉ backend</span>
+          <input id="server-base" type="url" inputmode="url" autocomplete="off" placeholder="https://ten-may.ten-tailnet.ts.net" />
+        </label>
+        <label class="field">
+          <span>Mã truy cập</span>
+          <input id="server-token" type="password" autocomplete="off" placeholder="Chạy pnpm remote:token trên máy chủ để lấy mã" />
+        </label>
+        <p id="server-status" class="server-status" role="status"></p>
+        <div class="dialog-actions">
+          <button id="server-test" class="control-button" type="button">Kiểm tra</button>
+          <button class="control-button" value="cancel" formnovalidate>Đóng</button>
+          <button class="primary-button" value="save">Lưu &amp; kết nối</button>
+        </div>
+      </form>
+    </dialog>
 
     <main>
       <section id="library" class="library" aria-label="Thư viện bài học">
@@ -172,6 +199,6 @@
       </section>
     </main>
 
-    <script type="module" src="/assets/app.js"></script>
+    <script type="module" src="assets/app.js"></script>
   </body>
 </html>
