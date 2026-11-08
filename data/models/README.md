@@ -16,3 +16,10 @@ Run `pnpm setup:translation` once to download the Apache-2.0
 SHA-256. Without it, lessons still build; cue translations are simply empty.
 
 Override the location with `WATCH2LEARN_TRANSLATION_MODEL=/absolute/path`.
+
+# Local voices
+
+Run `pnpm setup:voices` to download the Piper voices `zh_CN-chaowen-medium`
+(dataset CC0) and `vi_VN-vais1000-medium` (VAIS-1000, CC BY 4.0) into
+`data/models/piper/`, pinned to a revision and verified by SHA-256. They read
+words, sentences and explanations aloud in any browser.

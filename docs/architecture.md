@@ -118,11 +118,15 @@ that sentence; other readings stay available as `alternatives`.
   aligned so missing/extra syllables are penalised. It is an estimate: tones come
   from the recognised words, not from pitch analysis. Best/last scores are kept
   for saved items.
-- Spoken explanation: the browser reads verified facts (word, per-syllable tone
-  guide, CVDICT meaning, sense in this sentence, original cue and translation) with
-  local OS voices, then the "when/where is it used" part from a local Ollama model
-  (`WATCH2LEARN_OLLAMA_MODEL`, default `qwen3:8b`), labelled as AI and cached per
-  word context in `explanations`.
+- Explanations (word and sentence) show verified facts first — word, per-syllable
+  tone guide, CVDICT meaning, sense in this sentence, cue and translation; for a
+  sentence its word-by-word glossary — then AI notes from a local Ollama model
+  (`WATCH2LEARN_OLLAMA_MODEL`, default `qwen3:8b`): when/where a word is used, or a
+  sentence's structure and situation. AI text is labelled and cached per context.
+  Each panel can be read silently ("Xem") or aloud ("Nghe").
+- Reading aloud uses `POST /api/tts`: local Piper voices (Chinese from our context
+  pinyin, Vietnamese via espeak phonemes), cached as AAC in `data/tts-cache/`. The
+  browser's Web Speech voices are only a fallback when no voices are installed.
 
 ## Mandarin record shape
 

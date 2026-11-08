@@ -20,7 +20,17 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import explain, jobs, learning, pronunciation, security, storage, translation, youtube
+from . import (
+    explain,
+    jobs,
+    learning,
+    pronunciation,
+    security,
+    storage,
+    translation,
+    tts,
+    youtube,
+)
 from .asr import model_ready, transcribe_clip, transcribe_mandarin
 from .dictionary import load_cedict, load_vietnamese
 from .lesson import (
@@ -156,6 +166,7 @@ async def health(request: Request) -> dict:
         "translation_unit": translation.TRANSLATION_UNIT,
         "explain_model_ready": await asyncio.to_thread(explain.model_ready),
         "explain_model": explain.model_name(),
+        "tts_ready": tts.voices_ready(),
     }
 
 
@@ -832,14 +843,49 @@ async def score_recording(
 
 class ExplainRequest(BaseModel):
     lesson_id: str = Field(pattern=r"^[0-9a-f]{32}$")
-    word_id: str = Field(pattern=WORD_ID_PATTERN)
+    word_id: str | None = Field(default=None, pattern=WORD_ID_PATTERN)
     cue_id: str | None = Field(default=None, max_length=64)
+
+
+def sentence_words(lesson: dict, cue: dict) -> list[dict]:
+    """Dictionary meaning of each word in the cue, in sentence order."""
+    words = {item["id"]: item for item in lesson.get("vocabulary", [])}
+    glossary = []
+    for segment in cue.get("segments", []):
+        word = words.get(segment.get("vocabulary_id"))
+        if not word:
+            continue
+        meanings = [item for item in word.get("definitions_vi", []) if ":" not in item[:3]]
+        glossary.append(
+            {
+                "word": segment["text"],
+                "pinyin": segment.get("pinyin"),
+                "meaning": meanings[0] if meanings else None,
+            }
+        )
+    return glossary
 
 
 @app.post("/api/explain")
 async def explain_word(request: ExplainRequest) -> dict:
-    """AI (local Ollama) explanation of when/where a word is used, cached per context."""
+    """AI (local Ollama) explanation of a word in context, or of a whole sentence."""
     lesson = completed_lesson(request.lesson_id)
+    if not request.word_id:
+        if not request.cue_id:
+            raise HTTPException(status_code=422, detail="word_id or cue_id is required")
+        cue = find_cue(lesson, request.cue_id)
+        try:
+            return await asyncio.to_thread(
+                explain.explain_sentence,
+                cue["text"],
+                cue.get("translation_vi"),
+                sentence_words(lesson, cue),
+            ) | {"words": sentence_words(lesson, cue)}
+        except (OSError, KeyError, ValueError, RuntimeError) as error:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Chưa dùng được AI local ({explain.model_name()} qua Ollama): {error}",
+            ) from error
     word = next((item for item in lesson["vocabulary"] if item["id"] == request.word_id), None)
     if not word:
         raise HTTPException(status_code=404, detail="Word was not found in this lesson")
@@ -853,3 +899,33 @@ async def explain_word(request: ExplainRequest) -> dict:
             status_code=503,
             detail=f"Chưa dùng được AI local ({explain.model_name()} qua Ollama): {error}",
         ) from error
+
+
+class SpeechPart(BaseModel):
+    text: str = Field(min_length=1, max_length=600)
+    lang: Literal["zh", "vi"]
+    rate: float = Field(default=1.0, ge=0.5, le=1.5)
+
+
+class SpeechRequest(BaseModel):
+    parts: list[SpeechPart] = Field(min_length=1, max_length=tts.MAX_PARTS)
+
+
+@app.post("/api/tts")
+async def read_aloud(request: SpeechRequest) -> FileResponse:
+    """Read Chinese/Vietnamese parts aloud with local Piper voices (cached AAC audio)."""
+    if not tts.voices_ready():
+        raise HTTPException(
+            status_code=503, detail="Chưa cài giọng đọc trên máy chủ. Chạy pnpm setup:voices."
+        )
+    parts = [part.model_dump() for part in request.parts]
+    if sum(len(part["text"]) for part in parts) > tts.MAX_CHARACTERS:
+        raise HTTPException(status_code=413, detail="Đoạn cần đọc quá dài")
+    try:
+        path = await asyncio.to_thread(tts.synthesize, parts)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+        raise HTTPException(status_code=503, detail="Không tạo được giọng đọc") from error
+    headers = {"Cache-Control": "private, max-age=86400"}
+    return FileResponse(path, media_type="audio/mp4", headers=headers)

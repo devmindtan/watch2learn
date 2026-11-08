@@ -164,3 +164,17 @@ a defect that escaped a completed check, or a manual task repeated at least twic
   partial audio from the first run.
 - Reusable rule: resumable stages must clear their own partial outputs first.
 - Verification: the ASR-choice test seeds a stale `speech.wav`.
+
+## 2026-11-08 — spoken explanations were silent in Chrome on Linux
+
+- Evidence: the learner reported the word explanation as missing. A headed Chrome
+  on this machine returned 0 `speechSynthesis` voices (13 363 only with
+  `--enable-speech-dispatcher`); headless test runs had hidden the problem and the
+  UI only showed a soft "default voice" note.
+- Root cause: relying on browser Web Speech voices, which Chrome on Linux does not
+  expose by default.
+- Reusable rule: produce learner-facing audio on the backend (Piper) and treat
+  browser voices as fallback; verify audio features with a headed browser or by
+  asserting that audio playback actually started.
+- Verification: `test_local_voices_read_mixed_chinese_and_vietnamese`; Playwright
+  asserts `/api/tts` returns `audio/mp4` and an audio element starts playing.

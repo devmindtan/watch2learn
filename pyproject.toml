@@ -17,6 +17,7 @@ asr = [
   "av==18.1.0",
   "ctranslate2>=4.6.0",
   "faster-whisper>=1.2.1",
+  "piper-tts==1.8.0",
   "sentencepiece>=0.2.0",
   "yt-dlp[default]>=2026.10.26",
 ]

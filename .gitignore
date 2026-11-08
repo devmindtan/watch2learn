@@ -30,6 +30,7 @@ data/dictionaries/*
 !data/dictionaries/README.md
 !data/dictionaries/ATTRIBUTION.md
 data/jobs/
+data/tts-cache/
 *.part
 *.tmp
 data/access-token

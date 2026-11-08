@@ -10,7 +10,15 @@ import {
 } from "./learner.js";
 import { initLibrary, refreshLibrary } from "./library.js";
 import { openPractice } from "./practice.js";
-import { canSpeak, onVoices, speak, speakScript, stopSpeaking, toneDescription } from "./speech.js";
+import {
+  configureSpeech,
+  onVoices,
+  speak,
+  speakScript,
+  speechInfo,
+  stopSpeaking,
+  toneDescription,
+} from "./speech.js";
 import {
   $,
   button,
@@ -98,13 +106,12 @@ const cueIndexById = new Map();
 
 const preferences = readStore("watch2learn-preferences", { pinyin: true, translation: true });
 
-onVoices((voices) => {
-  speakCueButton.disabled = !canSpeak;
-  speakCueButton.title = !canSpeak
-    ? "Trình duyệt không hỗ trợ đọc văn bản."
-    : voices.zh
-      ? `Đọc chậm bằng giọng máy (${voices.zh.name})`
-      : "Máy chưa có giọng đọc tiếng Trung — dùng “Nghe lại” để nghe giọng gốc trong video.";
+onVoices((info) => {
+  speakCueButton.title = info.server
+    ? "Đọc chậm bằng giọng đọc trên máy chủ"
+    : info.browserZh
+      ? `Đọc chậm bằng giọng máy (${info.browserZh.name})`
+      : "Chưa có giọng đọc — chạy pnpm setup:voices trên máy chủ, hoặc dùng “Nghe lại” để nghe giọng gốc.";
 });
 
 /* ---------- Player: saved local file or YouTube embed ---------- */
@@ -489,6 +496,7 @@ $("#server-test").addEventListener("click", async () => {
 async function loadHealth() {
   const { health, message } = await checkServer();
   state.health = health;
+  configureSpeech({ server: health?.tts_ready });
   if (!health) {
     openServerDialog(message);
     return;
@@ -498,6 +506,7 @@ async function loadHealth() {
     ["vietnamese_dictionary_loaded", "Từ điển Trung–Việt", "pnpm setup:dictionary"],
     ["dictionary_loaded", "Cách đọc (CC-CEDICT)", "pnpm setup:dictionary"],
     ["translation_model_ready", "Dịch câu offline", "pnpm setup:translation"],
+    ["tts_ready", "Giọng đọc Trung–Việt", "pnpm setup:voices"],
     ["explain_model_ready", `Giải thích bằng AI (${state.health.explain_model})`, `ollama pull ${state.health.explain_model}`],
   ];
   readiness.replaceChildren(
@@ -881,7 +890,6 @@ function showWord(id, occurrenceIndex = 0, { keepScroll = false } = {}) {
   identity.append(hanzi, element("p", "word-pinyin", occurrence.pinyin || word.pinyin));
   const actions = element("div", "word-actions");
   const speakButton = button("control-button", "🔈 Phát âm", () => speak(occurrence.surface || word.word, 0.7));
-  speakButton.disabled = !canSpeak;
   const saveButton = button("control-button known-button", status ? "★ Đã lưu" : "☆ Lưu từ", () =>
     status ? setWordStatus(id, status) : setWordStatus(id, "saved"),
   );
@@ -909,8 +917,11 @@ function showWord(id, occurrenceIndex = 0, { keepScroll = false } = {}) {
         itemId: status ? id : null,
       }),
     ),
-    button("control-button explain-button", "🗣 Giải thích bằng giọng nói", () =>
-      explainAloud(word, occurrence, cue, inContext),
+    button("control-button explain-button", "📖 Xem giải thích", () =>
+      explainWord(word, occurrence, cue, inContext, { speakIt: false }),
+    ),
+    button("control-button explain-button", "🗣 Nghe giải thích", () =>
+      explainWord(word, occurrence, cue, inContext, { speakIt: true }),
     ),
   );
 
@@ -1041,17 +1052,84 @@ function showWord(id, occurrenceIndex = 0, { keepScroll = false } = {}) {
   highlightSelection();
 }
 
-let availableVoices = { zh: null, vi: null };
-onVoices((voices) => {
-  availableVoices = voices;
-});
+/**
+ * Explanation panel shared by words and sentences: verified facts first, then the
+ * local AI's notes. With `speakIt` the facts are read aloud immediately and the AI
+ * part follows when it is ready; otherwise the panel is for reading only.
+ */
+function explanationPanel(box, { title, script, lines, request, aiTitle, speakIt }) {
+  const run = Symbol("explain");
+  box.run = run;
+  const facts = element("div", "explain-facts");
+  lines.forEach((line) => facts.append(element("p", null, line)));
+  const aiArea = element("div", "explain-ai");
+  const status = element("p", "explain-status");
+  let aiText = "";
+  let waitingForAi = false;
+  const fail = (error) => {
+    if (box.run === run) status.textContent = `Không phát được âm thanh: ${error.message || error}`;
+  };
+  const speakAi = () => {
+    waitingForAi = !aiText;
+    if (aiText && box.run === run) speakScript([{ text: `${aiTitle}.`, lang: "vi" }, { text: aiText }], { onError: fail });
+  };
+  const speakAll = async () => {
+    status.textContent = "";
+    const started = await speakScript(script, { onEnd: speakAi, onError: fail });
+    if (!started && box.run === run) {
+      status.textContent = speechInfo().server
+        ? "Không phát được âm thanh."
+        : "Chưa có giọng đọc: chạy “pnpm setup:voices” trên máy chủ (Chrome trên Linux không có sẵn giọng đọc).";
+    }
+  };
+  const controls = element("div", "explain-controls");
+  controls.append(
+    button("control-button", "🔊 Nghe giải thích", speakAll),
+    button("control-button", "⏹ Dừng", () => stopSpeaking()),
+  );
+  box.replaceChildren(element("h3", null, title), controls, status, facts, aiArea);
+  box.hidden = false;
+  if (speakIt) {
+    pause();
+    speakAll();
+  }
 
-/** Read the word aloud: verified facts first, then the local AI's usage notes. */
-async function explainAloud(word, occurrence, cue, inContext) {
+  if (!state.health?.explain_model_ready) {
+    aiArea.append(
+      element(
+        "p",
+        "sense-note",
+        `Phần do AI giải thích cần Ollama trên máy chủ: chạy “ollama pull ${state.health?.explain_model || "qwen3:8b"}”.`,
+      ),
+    );
+    return;
+  }
+  const waiting = element("p", "sense-note", "AI trên máy bạn đang soạn phần giải thích… (lần đầu khoảng 30–40 giây)");
+  aiArea.append(waiting);
+  apiJson("/api/explain", { method: "POST", json: request })
+    .then((result) => {
+      if (box.run !== run) return;
+      aiText = result.text;
+      aiArea.replaceChildren(
+        element("h4", null, aiTitle),
+        element("p", "explain-ai-text", result.text),
+        element(
+          "p",
+          "ai-label",
+          `Do AI (${result.model}) chạy trên máy bạn soạn — có thể chưa chính xác; nghĩa từ điển ở trên là nguồn chuẩn.`,
+        ),
+      );
+      if (waitingForAi) speakAi();
+    })
+    .catch((error) => {
+      if (box.run === run) waiting.textContent = error.message;
+    });
+}
+
+/** Word: meaning, pronunciation (tone of every syllable), the sentence, then AI usage. */
+function explainWord(word, occurrence, cue, inContext, { speakIt }) {
   const box = wordDetail.querySelector(".explain-box");
   if (!box) return;
-  const run = Symbol("explain");
-  state.explainRun = run;
   const surface = occurrence.surface || word.word;
   const syllables = (occurrence.pinyin || word.pinyin || "").split(/\s+/).filter(Boolean);
   const characters = [...surface];
@@ -1059,10 +1137,10 @@ async function explainAloud(word, occurrence, cue, inContext) {
   const meaningText = ownMeaning(word.id) || senses.slice(0, 3).join("; ");
 
   const script = [{ text: "Từ", lang: "vi" }, { text: surface, lang: "zh", rate: 0.65 }];
-  const lines = [`Từ ${surface} — ${syllables.join(" ")}`];
+  const lines = [`Từ ${surface} — đọc là ${syllables.join(" ")}`];
   if (characters.length === syllables.length) {
     characters.forEach((character, index) => {
-      script.push({ text: character, lang: "zh", rate: 0.55 }, { text: `${toneDescription(syllables[index])}.`, lang: "vi" });
+      script.push({ text: character, lang: "zh", rate: 0.6 }, { text: `${toneDescription(syllables[index])}.`, lang: "vi" });
       lines.push(`${character} (${syllables[index]}): ${toneDescription(syllables[index])}.`);
     });
   }
@@ -1080,68 +1158,59 @@ async function explainAloud(word, occurrence, cue, inContext) {
     script.push({ text: `Nghĩa của câu: ${cue.translation_vi}`, lang: "vi" });
     lines.push(`Nghĩa của câu: ${cue.translation_vi}`);
   }
+  explanationPanel(box, {
+    title: "Giải thích từ",
+    script,
+    lines,
+    request: { lesson_id: state.lesson.id, word_id: word.id, cue_id: occurrence.cue_id },
+    aiTitle: "Dùng khi nào, ở đâu trong thực tế",
+    speakIt,
+  });
+}
 
-  const facts = element("div", "explain-facts");
-  lines.forEach((line) => facts.append(element("p", null, line)));
-  const aiArea = element("div", "explain-ai");
-  const controls = element("div", "explain-controls");
-  const status = element("p", "explain-status");
-  let aiText = "";
-  let factsDone = false;
-  const speakAi = () =>
-    aiText && state.explainRun === run && speakScript([{ text: "Cách dùng thực tế.", lang: "vi" }, { text: aiText }]);
-  const speakAll = () => {
-    factsDone = false;
-    const started = speakScript(script, {
-      onEnd: () => {
-        factsDone = true;
-        speakAi();
-      },
-    });
-    if (!started) status.textContent = "Trình duyệt không đọc được thành tiếng — bạn có thể đọc nội dung bên dưới.";
-  };
-  controls.append(
-    button("control-button", "▶ Đọc lại", speakAll),
-    button("control-button", "⏹ Dừng", () => stopSpeaking()),
-  );
-  if (!availableVoices.vi || !availableVoices.zh) {
-    status.textContent = `Máy này chưa có giọng đọc ${[!availableVoices.vi && "tiếng Việt", !availableVoices.zh && "tiếng Trung"]
-      .filter(Boolean)
-      .join(" và ")}; trình duyệt sẽ dùng giọng mặc định.`;
+/** Sentence: the sentence, its translation, each word's meaning, then AI grammar/usage. */
+function explainSentence({ speakIt }) {
+  const cue = state.lesson?.cues[state.activeCue];
+  if (!cue) return;
+  const box = $("#sentence-explain");
+  const pinyin = cue.segments.map((segment) => segment.pinyin).filter(Boolean).join(" ");
+  const script = [{ text: "Câu", lang: "vi" }, { text: cue.text, lang: "zh", rate: 0.75 }];
+  const lines = [`${cue.text}`, pinyin];
+  if (cue.translation_vi) {
+    script.push({ text: `Nghĩa là: ${cue.translation_vi}`, lang: "vi" });
+    lines.push(`Nghĩa: ${cue.translation_vi}`);
   }
-  box.replaceChildren(element("h3", null, "Giải thích bằng giọng nói"), controls, status, facts, aiArea);
-  box.hidden = false;
-  speakAll();
+  const glossary = cue.segments
+    .filter((segment) => segment.vocabulary_id && wordsById.has(segment.vocabulary_id))
+    .map((segment) => ({ text: segment.text, pinyin: segment.pinyin, meaning: firstMeaning(wordsById.get(segment.vocabulary_id)) }))
+    .filter((item) => item.meaning);
+  if (glossary.length) {
+    script.push({ text: "Từng từ:", lang: "vi" });
+    lines.push("Từng từ:");
+    glossary.forEach((item) => {
+      script.push({ text: item.text, lang: "zh", rate: 0.7 }, { text: `${item.meaning}.`, lang: "vi" });
+      lines.push(`  ${item.text} (${item.pinyin || ""}): ${item.meaning}`);
+    });
+  }
+  explanationPanel(box, {
+    title: "Giải thích câu",
+    script,
+    lines,
+    request: { lesson_id: state.lesson.id, cue_id: cue.id },
+    aiTitle: "Cấu trúc câu và khi nào dùng",
+    speakIt,
+  });
+}
 
-  if (!state.health?.explain_model_ready) {
-    aiArea.append(
-      element("p", "sense-note", `Phần “dùng khi nào, ở đâu” cần AI local: cài Ollama và chạy “ollama pull ${state.health?.explain_model || "qwen3:8b"}”.`),
-    );
-    return;
-  }
-  const waiting = element("p", "sense-note", "AI trên máy bạn đang soạn phần cách dùng thực tế… (lần đầu khoảng 30 giây)");
-  aiArea.append(waiting);
-  try {
-    const result = await apiJson("/api/explain", {
-      method: "POST",
-      json: { lesson_id: state.lesson.id, word_id: word.id, cue_id: occurrence.cue_id },
-    });
-    if (state.explainRun !== run) return;
-    aiText = result.text;
-    const text = element("p", "explain-ai-text", result.text);
-    aiArea.replaceChildren(
-      element("h4", null, "Cách dùng thực tế"),
-      text,
-      element("p", "ai-label", `Do AI (${result.model}) chạy trên máy bạn soạn — có thể chưa chính xác; nghĩa từ điển ở trên mới là nguồn chuẩn.`),
-    );
-    if (factsDone) speakAi();
-  } catch (error) {
-    if (state.explainRun === run) waiting.textContent = error.message;
-  }
+function closeSentenceExplanation() {
+  const box = $("#sentence-explain");
+  box.run = null;
+  box.hidden = true;
 }
 
 function closeWord() {
-  state.explainRun = null;
+  const box = wordDetail.querySelector(".explain-box");
+  if (box) box.run = null;
   stopSpeaking();
   state.selectedWord = null;
   wordDetail.hidden = true;
@@ -1162,6 +1231,7 @@ function setActiveCue(index, { scroll = true } = {}) {
   nextButton.disabled = index === cues.length - 1;
   updateSentenceButtons();
   if (!changed && nowText.childElementCount) return;
+  closeSentenceExplanation();
   renderCueText(nowText, cue);
   nowTranslation.dataset.translationFor = cue.id;
   updateTranslationNode(nowTranslation, cue);
@@ -1199,6 +1269,8 @@ async function setSentenceStatus(status) {
     window.alert(error.message);
   }
 }
+
+$("#explain-cue").addEventListener("click", () => explainSentence({ speakIt: true }));
 
 saveCueButton.addEventListener("click", () => {
   const cue = state.lesson.cues[state.activeCue];

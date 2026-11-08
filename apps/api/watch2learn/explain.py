@@ -99,8 +99,32 @@ def ask_ollama(prompt: str) -> str:
         return json.load(response)["message"]["content"]
 
 
+def sentence_prompt(sentence: str, translation: str | None, words: list[dict]) -> str:
+    glossary = "; ".join(
+        f"{item['word']} = {item['meaning']}" for item in words if item.get("meaning")
+    )
+    return (
+        f"Câu tiếng Trung trong video: {sentence}\n"
+        f"Bản dịch máy: {translation or 'chưa có'}\n"
+        f"Nghĩa từng từ theo từ điển: {glossary or 'chưa có'}\n\n"
+        "Giải thích câu này cho người Việt mới học, viết liền thành đoạn văn để đọc: "
+        "thứ nhất, nghĩa tự nhiên của cả câu; "
+        "thứ hai, cấu trúc hoặc mẫu ngữ pháp chính trong câu và vai trò của các từ quan trọng; "
+        "thứ ba, câu này thường được nói trong tình huống nào; "
+        "thứ tư, một câu ví dụ khác dùng cùng mẫu, bằng chữ Hán kèm nghĩa tiếng Việt. "
+        "Tổng cộng dưới 140 từ."
+    )
+
+
+def explain_sentence(sentence: str, translation: str | None, words: list[dict]) -> dict:
+    return answer(sentence_prompt(sentence, translation, words), f"sentence:{sentence}")
+
+
 def explain_word(word: dict, sentence: str, translation: str | None) -> dict:
-    prompt = prompt_for(word, sentence, translation)
+    return answer(prompt_for(word, sentence, translation), word["id"])
+
+
+def answer(prompt: str, subject: str) -> dict:
     key = hashlib.sha256(f"{model_name()}\n{prompt}".encode()).hexdigest()
     initialize_cache()
     with connect() as connection:
@@ -115,6 +139,6 @@ def explain_word(word: dict, sentence: str, translation: str | None) -> dict:
     with connect() as connection:
         connection.execute(
             "INSERT OR REPLACE INTO explanations VALUES (?, ?, ?, ?, ?)",
-            (key, word["id"], model_name(), text, now()),
+            (key, subject, model_name(), text, now()),
         )
     return {"text": text, "model": model_name(), "cached": False, "source": "ai-local"}

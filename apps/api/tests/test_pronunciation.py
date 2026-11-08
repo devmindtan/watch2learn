@@ -92,3 +92,21 @@ def test_explanations_are_generated_once_per_context(monkeypatch, tmp_path):
     assert first["text"] == "Trong câu này 学习 nghĩa là học. Dùng ở trường học."
     assert first["cached"] is False and second["cached"] is True
     assert len(calls) == 1 and "今天学习中文。" in calls[0]
+
+
+def test_sentence_explanations_include_the_word_glossary(monkeypatch, tmp_path):
+    lesson_id = make_lesson(monkeypatch, tmp_path)
+    prompts = []
+    reply = "Câu này dùng mẫu 今天 + động từ."
+    monkeypatch.setattr(explain, "ask_ollama", lambda prompt: prompts.append(prompt) or reply)
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            body = {"lesson_id": lesson_id, "cue_id": "cue-2"}
+            return (await client.post("/api/explain", json=body)).json()
+
+    result = asyncio.run(scenario())
+    assert result["text"] == "Câu này dùng mẫu 今天 + động từ."
+    assert {"word": "学习", "pinyin": "xué xí", "meaning": "học"} in result["words"]
+    assert "学习 = học" in prompts[0] and "今天学习中文。" in prompts[0]

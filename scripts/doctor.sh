@@ -46,6 +46,8 @@ if [[ "$ci_mode" == false ]]; then
     "data/dictionaries/cedict_ts.u8"
     "data/dictionaries/cvdict.u8"
     "data/models/opus-mt-zh-vi/model.bin"
+    "data/models/piper/zh_CN-chaowen-medium.onnx"
+    "data/models/piper/vi_VN-vais1000-medium.onnx"
   )
   for asset_path in "${required_assets[@]}"; do
     if [[ -f "$project_root/$asset_path" ]]; then
