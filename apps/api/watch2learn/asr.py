@@ -73,3 +73,22 @@ def transcribe_mandarin(
         "detected_language": info.language,
         "language_probability": round(info.language_probability, 4),
     }
+
+
+def transcribe_clip(audio_path: str | Path) -> str:
+    """Short learner recording (a word or sentence) → Chinese text, no timestamps."""
+    segments, _info = load_model().transcribe(
+        str(audio_path),
+        language="zh",
+        beam_size=5,
+        temperature=0.0,
+        vad_filter=False,
+        condition_on_previous_text=False,
+        without_timestamps=True,
+    )
+    texts = [
+        segment.text.strip()
+        for segment in segments
+        if segment.no_speech_prob < 0.6 or segment.avg_logprob > -0.7
+    ]
+    return "".join(texts)

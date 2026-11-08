@@ -3,8 +3,10 @@
 import os
 import re
 import shutil
+import subprocess
 from pathlib import Path
 
+from .media import media_binary
 from .security import signed_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -44,10 +46,52 @@ def store_media(lesson_id: str, source: Path) -> Path:
     target = directory / f"video{suffix}"
     staging = directory / f".incoming{suffix}"
     shutil.move(str(source), staging)
-    for old in directory.glob("video.*"):
+    for old in [*directory.glob("video.*"), directory / "thumb.jpg"]:
         old.unlink(missing_ok=True)
     os.replace(staging, target)
     return target
+
+
+def thumbnail(lesson_id: str) -> Path | None:
+    """A small JPEG frame next to the saved video, created on first request."""
+    media = stored_media(lesson_id)
+    if not media:
+        return None
+    target = media.parent / "thumb.jpg"
+    if target.is_file():
+        return target
+    for offset in ("3", "0"):
+        try:
+            subprocess.run(
+                [
+                    str(media_binary("ffmpeg")),
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-nostdin",
+                    "-y",
+                    "-ss",
+                    offset,
+                    "-i",
+                    str(media),
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "scale=480:-2",
+                    "-q:v",
+                    "5",
+                    str(target),
+                ],
+                check=True,
+                capture_output=True,
+                timeout=60,
+            )
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            continue
+        if target.is_file() and target.stat().st_size:
+            return target
+    target.unlink(missing_ok=True)
+    return None
 
 
 def delete_media(lesson_id: str) -> None:

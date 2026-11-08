@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import logging
 import mimetypes
+import re
 import shutil
 import subprocess
 import tempfile
@@ -13,14 +14,14 @@ from pathlib import Path
 from threading import Lock
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import jobs, security, storage, translation, youtube
-from .asr import model_ready, transcribe_mandarin
+from . import explain, jobs, learning, pronunciation, security, storage, translation, youtube
+from .asr import model_ready, transcribe_clip, transcribe_mandarin
 from .dictionary import load_cedict, load_vietnamese
 from .lesson import (
     ANALYSIS_VERSION,
@@ -153,6 +154,8 @@ async def health(request: Request) -> dict:
         "asr_model_ready": model_ready(),
         "translation_model_ready": translation.model_ready(),
         "translation_unit": translation.TRANSLATION_UNIT,
+        "explain_model_ready": await asyncio.to_thread(explain.model_ready),
+        "explain_model": explain.model_name(),
     }
 
 
@@ -416,12 +419,43 @@ async def job_status(job_id: str) -> dict:
     return job
 
 
+def thumbnail_url(item: dict, has_media: bool) -> str | None:
+    if has_media:
+        return security.signed_url(f"/api/lessons/{item['id']}/thumbnail")
+    if item.get("youtube_id"):
+        return f"https://i.ytimg.com/vi/{item['youtube_id']}/mqdefault.jpg"
+    return None
+
+
 @app.get("/api/lessons")
 async def list_lessons() -> list[dict]:
-    return [
-        item | {"has_media": storage.stored_media(item["id"]) is not None}
-        for item in jobs.recent_lessons()
-    ]
+    learned = {
+        word_id
+        for word_id, entry in learning.learner_state()["words"].items()
+        if entry["status"] == "learned"
+    }
+    lessons = []
+    for item in jobs.recent_lessons():
+        word_ids = set(item.pop("vocabulary_ids"))
+        has_media = storage.stored_media(item["id"]) is not None
+        lessons.append(
+            item
+            | {
+                "has_media": has_media,
+                "thumbnail_url": thumbnail_url(item, has_media),
+                "learned_count": len(word_ids & learned),
+            }
+        )
+    return lessons
+
+
+@app.get("/api/lessons/{lesson_id}/thumbnail")
+async def lesson_thumbnail(lesson_id: str) -> FileResponse:
+    path = await asyncio.to_thread(storage.thumbnail, lesson_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="No thumbnail for this lesson")
+    headers = {"Cache-Control": "private, max-age=86400"}
+    return FileResponse(path, media_type="image/jpeg", headers=headers)
 
 
 def completed_lesson(lesson_id: str) -> dict:
@@ -636,3 +670,186 @@ async def translate_saved_lesson(lesson_id: str) -> dict:
             for cue in lesson["cues"]
         ],
     }
+
+
+WORD_ID_PATTERN = r"^word-[0-9a-f]{12}$"
+Status = Literal["saved", "learned"]
+
+
+class WordUpdate(BaseModel):
+    status: Status | None = None
+    own_meaning: str | None = Field(default=None, max_length=500)
+    lesson_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    cue_id: str | None = Field(default=None, max_length=64)
+
+
+class SentenceUpdate(BaseModel):
+    status: Status | None = None
+
+
+class LibraryImport(BaseModel):
+    learned: list[Annotated[str, Field(pattern=WORD_ID_PATTERN)]] = Field(
+        default_factory=list, max_length=20000
+    )
+    meanings: dict[str, Annotated[str, Field(max_length=500)]] = Field(default_factory=dict)
+
+
+def check_word_id(word_id: str) -> None:
+    if not re.fullmatch(WORD_ID_PATTERN, word_id):
+        raise HTTPException(status_code=422, detail="Invalid word ID")
+
+
+def find_cue(lesson: dict, cue_id: str) -> dict:
+    cue = next((item for item in lesson.get("cues", []) if item["id"] == cue_id), None)
+    if not cue:
+        raise HTTPException(status_code=404, detail="Sentence was not found in this lesson")
+    return cue
+
+
+def with_lesson_links(rows: list[dict]) -> list[dict]:
+    existing = set(jobs.completed_ids())
+    return [row | {"lesson_exists": row.get("lesson_id") in existing} for row in rows]
+
+
+@app.get("/api/library/state")
+async def library_state() -> dict:
+    return learning.learner_state()
+
+
+@app.get("/api/library/words")
+async def library_words(status: Status | None = None) -> list[dict]:
+    return with_lesson_links(learning.list_words(status))
+
+
+@app.put("/api/library/words/{word_id}")
+async def update_library_word(word_id: str, update: WordUpdate) -> dict:
+    check_word_id(word_id)
+    fields = None
+    if update.lesson_id:
+        fields = learning.word_fields(completed_lesson(update.lesson_id), word_id, update.cue_id)
+        if not fields:
+            raise HTTPException(status_code=404, detail="Word was not found in this lesson")
+    saved = learning.save_word(word_id, update.status, update.own_meaning, update.lesson_id, fields)
+    if not saved:
+        raise HTTPException(status_code=422, detail="lesson_id is required to save a new word")
+    return saved
+
+
+@app.delete("/api/library/words/{word_id}", status_code=204)
+async def delete_library_word(word_id: str) -> None:
+    check_word_id(word_id)
+    if not learning.delete_word(word_id):
+        raise HTTPException(status_code=404, detail="Word is not in the library")
+
+
+@app.get("/api/library/sentences")
+async def library_sentences(status: Status | None = None) -> list[dict]:
+    return with_lesson_links(learning.list_sentences(status))
+
+
+@app.put("/api/library/sentences/{lesson_id}/{cue_id}")
+async def update_library_sentence(lesson_id: str, cue_id: str, update: SentenceUpdate) -> dict:
+    cue = find_cue(completed_lesson(lesson_id), cue_id)
+    return learning.save_sentence(lesson_id, cue, update.status)
+
+
+@app.delete("/api/library/sentences/{lesson_id}/{cue_id}", status_code=204)
+async def delete_library_sentence(lesson_id: str, cue_id: str) -> None:
+    if not learning.delete_sentence(learning.sentence_id(lesson_id, cue_id)):
+        raise HTTPException(status_code=404, detail="Sentence is not in the library")
+
+
+@app.post("/api/library/import")
+async def import_library(payload: LibraryImport) -> dict:
+    """One-time move of words marked in a browser's local storage to the backend."""
+    meaning_ids = {key for key in payload.meanings if re.fullmatch(WORD_ID_PATTERN, key)}
+    wanted = set(payload.learned) | meaning_ids
+    imported = 0
+    for lesson_id in jobs.completed_ids():
+        if not wanted:
+            break
+        lesson = jobs.get(lesson_id)["result"]
+        for word in lesson.get("vocabulary", []):
+            if word["id"] not in wanted:
+                continue
+            fields = learning.word_fields(lesson, word["id"], None)
+            status = "learned" if word["id"] in payload.learned else "saved"
+            learning.save_word(
+                word["id"], status, payload.meanings.get(word["id"]), lesson_id, fields
+            )
+            wanted.discard(word["id"])
+            imported += 1
+    return {"imported": imported, "not_found": len(wanted)}
+
+
+MAX_RECORDING_BYTES = 4 * 1024 * 1024
+RECORDING_SUFFIXES = {".webm", ".ogg", ".m4a", ".mp4", ".wav", ".mp3"}
+
+
+def check_pronunciation(recording: Path, work_dir: Path, target: str) -> dict:
+    speech = extract_asr_audio(recording, work_dir / "speech.wav")
+    probe = probe_media(speech)
+    duration = float(probe.get("format", {}).get("duration") or 0)
+    if duration < 0.3:
+        raise ValueError("Bản ghi quá ngắn — hãy giữ nút ghi âm lâu hơn một chút.")
+    if duration > 30:
+        raise ValueError("Bản ghi dài quá 30 giây.")
+    return pronunciation.score_pronunciation(target, transcribe_clip(speech))
+
+
+@app.post("/api/pronunciation")
+async def score_recording(
+    audio: Annotated[UploadFile, File()],
+    target: Annotated[str, Form(min_length=1, max_length=200)],
+    kind: Annotated[Literal["word", "sentence"] | None, Form()] = None,
+    item_id: Annotated[str | None, Form(max_length=120)] = None,
+) -> dict:
+    """Record yourself saying a word/sentence; get an estimated % and per-syllable feedback."""
+    if not pronunciation.han_syllables(target):
+        raise HTTPException(status_code=422, detail="Câu mẫu không có chữ Hán")
+    suffix = Path(audio.filename or "recording.webm").suffix.lower() or ".webm"
+    if suffix not in RECORDING_SUFFIXES:
+        suffix = ".webm"
+    JOBS_ROOT.mkdir(parents=True, exist_ok=True)
+    work_dir = Path(tempfile.mkdtemp(prefix="speech-", dir=JOBS_ROOT))
+    try:
+        recording = work_dir / f"recording{suffix}"
+        size, _ = await save_upload(audio, recording, MAX_RECORDING_BYTES)
+        if not size:
+            raise HTTPException(status_code=422, detail="Không nhận được âm thanh")
+        try:
+            result = await asyncio.to_thread(check_pronunciation, recording, work_dir, target)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            raise HTTPException(status_code=422, detail="Không đọc được bản ghi âm") from error
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+    if kind and item_id:
+        learning.record_score(kind, item_id, result["score"])
+    return result
+
+
+class ExplainRequest(BaseModel):
+    lesson_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    word_id: str = Field(pattern=WORD_ID_PATTERN)
+    cue_id: str | None = Field(default=None, max_length=64)
+
+
+@app.post("/api/explain")
+async def explain_word(request: ExplainRequest) -> dict:
+    """AI (local Ollama) explanation of when/where a word is used, cached per context."""
+    lesson = completed_lesson(request.lesson_id)
+    word = next((item for item in lesson["vocabulary"] if item["id"] == request.word_id), None)
+    if not word:
+        raise HTTPException(status_code=404, detail="Word was not found in this lesson")
+    fields = learning.word_fields(lesson, request.word_id, request.cue_id)
+    try:
+        return await asyncio.to_thread(
+            explain.explain_word, word, fields["sentence"] or "", fields["sentence_translation"]
+        )
+    except (OSError, KeyError, ValueError, RuntimeError) as error:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Chưa dùng được AI local ({explain.model_name()} qua Ollama): {error}",
+        ) from error

@@ -195,6 +195,8 @@ def recent_lessons(limit: int = 30) -> list[dict]:
                 "vocabulary_count": len(result.get("vocabulary", [])),
                 "transcript_method": result.get("transcript", {}).get("method"),
                 "source_kind": result.get("source", {}).get("kind", "file"),
+                "youtube_id": result.get("source", {}).get("video_id"),
+                "vocabulary_ids": [item["id"] for item in result.get("vocabulary", [])],
             }
         )
     return lessons
