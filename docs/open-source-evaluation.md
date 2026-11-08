@@ -20,6 +20,8 @@ transitive licenses before pinning a production version.
 | OpenCC (`opencc` 1.4.x, BYVoid) | traditional → simplified conversion | Apache-2.0; offline phrase tables | Learner-facing text is simplified; original cue text kept in `text_original` |
 | CTranslate2 + SentencePiece | local sentence-translation runtime | MIT / Apache-2.0 | CPU int8 inference; CTranslate2 already ships with faster-whisper |
 | Helsinki-NLP/opus-mt-zh-vi (CTranslate2 int8 conversion `manancode/opus-mt-zh-vi-ctranslate2-android`) | offline zh→vi sentence translation | Apache-2.0; about 83 MB | Explicit `pnpm setup:translation`; pinned revision + per-file SHA-256; optional — lessons still work without it |
+| Ollama + Qwen3 8B (`qwen3:8b`) | optional usage explanations in Vietnamese | Ollama MIT; Qwen3 weights Apache-2.0; ~5 GB, CPU ≈30–40 s per new explanation | Local only, cached; AI-labelled; dictionary meaning stays the source of truth |
+| Web Speech API + OS voices (speech-dispatcher/espeak-ng on Linux) | reading words/explanations aloud | Browser/OS built-in | Prefers local voices; Piper is the candidate if natural server-side voices are needed |
 | Playwright | browser verification | Apache-2.0 | Critical flows only |
 | FastAPI | local HTTP API | MIT | Serve the local lesson API and static client |
 | pypinyin | Mandarin readings | MIT | Context-aware phrase readings with generated fallback |

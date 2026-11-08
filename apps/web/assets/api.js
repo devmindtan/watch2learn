@@ -43,6 +43,7 @@ export async function apiFetch(path, init = {}) {
 }
 
 export async function responseJson(response) {
+  if (response.status === 204) return {};
   let result = {};
   try {
     result = await response.json();

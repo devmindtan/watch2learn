@@ -106,6 +106,24 @@ whole cue is read by pypinyin, and the dictionary entry whose reading matches is
 selected, so polyphonic words (更 gèng/gēng, 行 xíng/háng) get the sense used in
 that sentence; other readings stay available as `alternatives`.
 
+## Learner library, practice and explanations
+
+- `learning.py` keeps saved/learned words and sentences in SQLite. Rows are filled
+  from the lesson on the server (word, reading, CVDICT meaning, cue, translation,
+  timestamp, lesson link); the client only sends IDs and status. Browsers that
+  stored known words locally import them once (`POST /api/library/import`).
+- Pronunciation (`POST /api/pronunciation`): the recording (≤30 s, ≤4 MB) is
+  transcribed by the local Whisper model and compared with the target on pinyin
+  syllables — initial 35 %, final 40 %, tone 25 % (neutral tone always accepted),
+  aligned so missing/extra syllables are penalised. It is an estimate: tones come
+  from the recognised words, not from pitch analysis. Best/last scores are kept
+  for saved items.
+- Spoken explanation: the browser reads verified facts (word, per-syllable tone
+  guide, CVDICT meaning, sense in this sentence, original cue and translation) with
+  local OS voices, then the "when/where is it used" part from a local Ollama model
+  (`WATCH2LEARN_OLLAMA_MODEL`, default `qwen3:8b`), labelled as AI and cached per
+  word context in `explanations`.
+
 ## Mandarin record shape
 
 A vocabulary entry should be able to hold simplified and traditional forms,

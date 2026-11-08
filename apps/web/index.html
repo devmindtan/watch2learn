@@ -58,7 +58,20 @@
     </dialog>
 
     <main>
-      <section id="library" class="library" aria-label="Thư viện bài học">
+      <section id="library" class="library" aria-label="Kho học tập">
+        <div class="library-tabs" role="tablist" aria-label="Kho học tập">
+          <button type="button" role="tab" data-library-tab="videos" aria-selected="true" aria-controls="library-videos">
+            Kho video <span id="count-videos" class="count"></span>
+          </button>
+          <button type="button" role="tab" data-library-tab="words" aria-selected="false" aria-controls="library-words" tabindex="-1">
+            Từ vựng <span id="count-words" class="count"></span>
+          </button>
+          <button type="button" role="tab" data-library-tab="sentences" aria-selected="false" aria-controls="library-sentences" tabindex="-1">
+            Câu <span id="count-sentences" class="count"></span>
+          </button>
+        </div>
+
+        <div id="library-videos" class="library-panel library-videos" role="tabpanel">
         <form id="lesson-form" class="card import-card">
           <h1>Tạo bài học mới</h1>
           <div class="source-switch" role="tablist" aria-label="Nguồn video">
@@ -114,11 +127,38 @@
           <ul id="readiness" class="readiness" aria-label="Thành phần offline"></ul>
         </form>
 
-        <section class="card recent-card" aria-labelledby="recent-title">
-          <h2 id="recent-title">Bài học gần đây</h2>
-          <p id="recent-empty" class="muted">Chưa có bài học nào được lưu trên máy này.</p>
-          <ol id="recent-list" class="recent-list"></ol>
+        <section class="video-section" aria-labelledby="videos-title">
+          <h2 id="videos-title">Video của bạn</h2>
+          <p id="videos-empty" class="muted" hidden>Chưa có video nào. Tạo bài học đầu tiên ở khung bên cạnh.</p>
+          <ol id="video-grid" class="video-grid"></ol>
         </section>
+        </div>
+
+        <div id="library-words" class="library-panel" role="tabpanel" hidden>
+          <div class="library-toolbar">
+            <div class="segmented" role="group" aria-label="Lọc từ">
+              <button type="button" data-words-status="saved" aria-pressed="true">Đang học</button>
+              <button type="button" data-words-status="learned" aria-pressed="false">Đã thuộc</button>
+              <button type="button" data-words-status="" aria-pressed="false">Tất cả</button>
+            </div>
+            <input id="words-search" type="search" placeholder="Tìm chữ Hán, pinyin hoặc nghĩa…" aria-label="Tìm từ đã lưu" />
+          </div>
+          <p id="words-empty" class="muted library-empty" hidden></p>
+          <ol id="words-list" class="library-list"></ol>
+        </div>
+
+        <div id="library-sentences" class="library-panel" role="tabpanel" hidden>
+          <div class="library-toolbar">
+            <div class="segmented" role="group" aria-label="Lọc câu">
+              <button type="button" data-sentences-status="saved" aria-pressed="true">Đang học</button>
+              <button type="button" data-sentences-status="learned" aria-pressed="false">Đã thuộc</button>
+              <button type="button" data-sentences-status="" aria-pressed="false">Tất cả</button>
+            </div>
+            <input id="sentences-search" type="search" placeholder="Tìm câu, pinyin hoặc bản dịch…" aria-label="Tìm câu đã lưu" />
+          </div>
+          <p id="sentences-empty" class="muted library-empty" hidden></p>
+          <ol id="sentences-list" class="library-list"></ol>
+        </div>
       </section>
 
       <section id="workspace" class="workspace" hidden>
@@ -155,6 +195,11 @@
                 </button>
                 <button id="next-cue" class="icon-button" type="button" title="Câu sau (→)" aria-label="Câu sau">›</button>
               </div>
+            </div>
+            <div class="sentence-study" role="group" aria-label="Học câu này">
+              <button id="save-cue" class="control-button" type="button" aria-pressed="false">☆ Lưu câu</button>
+              <button id="practice-cue" class="control-button" type="button" title="Ghi âm và chấm phát âm câu này">🎙 Đọc thử câu</button>
+              <button id="learned-cue" class="control-button" type="button" aria-pressed="false">✓ Đã thuộc câu</button>
             </div>
             <p id="now-text" class="now-text" lang="zh"></p>
             <p id="now-translation" class="now-translation translation"></p>
@@ -198,6 +243,11 @@
         </aside>
       </section>
     </main>
+
+    <dialog id="practice-dialog" class="practice-dialog" aria-label="Luyện phát âm">
+      <form method="dialog" class="practice-close"><button class="close-button" aria-label="Đóng">×</button></form>
+      <div id="practice-body"></div>
+    </dialog>
 
     <script type="module" src="assets/app.js"></script>
   </body>
