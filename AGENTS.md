@@ -93,8 +93,10 @@ and keep the memory entry as provenance.
 ## Current commands
 
 ```bash
-bash scripts/doctor.sh
-bash scripts/check-free-policy.sh
+pnpm setup
+pnpm dev
+pnpm quality
+pnpm run doctor
 python3 /home/devmindtan/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/<skill>
 ```
 

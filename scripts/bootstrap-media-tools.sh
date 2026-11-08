@@ -5,6 +5,11 @@ project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tools_dir="$project_root/.tools"
 bin_dir="$tools_dir/bin"
 
+if [[ -x "$bin_dir/ffmpeg" && -x "$bin_dir/ffprobe" ]]; then
+  echo "Repo-local FFmpeg and ffprobe are already ready."
+  exit 0
+fi
+
 if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; then
   echo "FFmpeg and ffprobe already exist on PATH."
   exit 0

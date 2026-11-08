@@ -11,9 +11,10 @@ transitive licenses before pinning a production version.
 | yt-dlp | permitted URL metadata/captions | source distribution is Unlicense; bundled builds differ | Use Python/uv source install, subtitle-first |
 | SYSTRAN/faster-whisper | local ASR | MIT | CPU int8 ASR adapter |
 | Systran/faster-whisper-small | multilingual model weights | MIT; about 484 MB | Explicit local download; Mandarin baseline |
+| PyAV 18.1.0 | bundled audio decoder used by faster-whisper | BSD-3-Clause; bundles FFmpeg libraries | Temporary compatibility pin; faster-whisper 1.2.1 breaks with PyAV 19 |
 | fxsjy/jieba | Mandarin segmentation | MIT | Baseline segmenter with correction support |
 | pypinyin | readings | MIT | Generate pinyin; retain dictionary readings |
-| CC-CEDICT | offline Chinese-English meanings | CC BY-SA 4.0; data obligations apply | Manual local install only; MDBG prohibits scripted access |
+| CC-CEDICT | offline Chinese-English meanings | CC BY-SA 4.0; attribution/share-alike apply | Pinned checksummed snapshot from an unmodified GitHub redistribution mirror; never script MDBG |
 | Playwright | browser verification | Apache-2.0 | Critical flows only |
 | FastAPI | local HTTP API | MIT | Serve the local lesson API and static client |
 | pypinyin | Mandarin readings | MIT | Context-aware phrase readings with generated fallback |

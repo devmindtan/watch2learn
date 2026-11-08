@@ -39,6 +39,22 @@ if [[ "$ci_mode" == false && ! -d .git ]]; then
   echo "notice   Git repository has not been initialized"
 fi
 
+if [[ "$ci_mode" == false ]]; then
+  required_assets=(
+    "data/models/faster-whisper-small/model.bin"
+    "data/models/faster-whisper-small/config.json"
+    "data/dictionaries/cedict_ts.u8"
+  )
+  for asset_path in "${required_assets[@]}"; do
+    if [[ -f "$project_root/$asset_path" ]]; then
+      echo "ok       $asset_path"
+    else
+      echo "missing  $asset_path (run pnpm setup)"
+      missing=1
+    fi
+  done
+fi
+
 if [[ "$missing" -ne 0 ]]; then
   exit 1
 fi

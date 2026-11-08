@@ -23,5 +23,9 @@ translation/ASR, paid analytics, commercial font/icon licenses, or "free tier"
 hosting as part of the core path. Optional future connectors must remain disabled,
 isolated, and unnecessary for all core outcomes; none are planned in phase one.
 
+Bundled local runtimes must have optional telemetry disabled before initialization.
+The core path does not send video, audio, transcripts, vocabulary, or usage events
+to a model vendor or analytics service.
+
 Video availability does not grant reuse rights. Only process content the learner
 is authorized to access and use. Do not implement DRM or access-control bypasses.

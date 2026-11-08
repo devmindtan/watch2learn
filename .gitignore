@@ -21,12 +21,14 @@ __pycache__/
 graphify-out/
 .graphify/
 data/media/
+data/*.sqlite3*
 data/models/*
 !data/models/README.md
 data/dictionaries/
 !data/dictionaries/
 data/dictionaries/*
 !data/dictionaries/README.md
+!data/dictionaries/ATTRIBUTION.md
 data/jobs/
 *.part
 *.tmp

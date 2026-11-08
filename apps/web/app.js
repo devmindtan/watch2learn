@@ -12,6 +12,12 @@ const wordCount = document.querySelector("#word-count");
 const formNote = document.querySelector("#form-note");
 const pinyinToggle = document.querySelector("#pinyin-toggle");
 const cueTemplate = document.querySelector("#cue-template");
+const progressBox = document.querySelector("#job-progress");
+const progressBar = document.querySelector("#job-progress-bar");
+const progressStage = document.querySelector("#job-stage");
+const progressPercent = document.querySelector("#job-percent");
+const recentList = document.querySelector("#recent-list");
+const recentEmpty = document.querySelector("#recent-empty");
 
 let lesson = null;
 let videoUrl = null;
@@ -43,6 +49,86 @@ function wordById(id) {
 
 function saveKnown() {
   localStorage.setItem("watch2learn-known", JSON.stringify([...knownWords]));
+}
+
+const stageLabels = {
+  uploaded: "Đã tải video vào bộ xử lý local",
+  "probing-video": "Đang đọc cấu trúc video",
+  "reading-subtitle": "Đang đọc phụ đề bạn cung cấp",
+  "reading-embedded-subtitle": "Đang đọc phụ đề nhúng trong video",
+  "extracting-audio": "Đang tách giọng nói khỏi video",
+  "transcribing-mandarin": "Đang nhận dạng tiếng Trung",
+  "analyzing-vocabulary": "Đang tạo từ vựng và ngữ cảnh",
+  complete: "Bài học đã sẵn sàng",
+};
+
+function showProgress(job) {
+  progressBox.hidden = false;
+  progressBar.value = job.progress;
+  progressBar.textContent = `${job.progress}%`;
+  progressStage.textContent = stageLabels[job.stage] || "Đang xử lý trên máy…";
+  progressPercent.textContent = `${job.progress}%`;
+}
+
+async function responseJson(response) {
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.detail || "Yêu cầu không thành công.");
+  return result;
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+async function waitForJob(initialJob) {
+  let job = initialJob;
+  while (job.status === "queued" || job.status === "processing") {
+    showProgress(job);
+    await delay(800);
+    job = await responseJson(await fetch(`/api/jobs/${job.id}`));
+  }
+  showProgress(job);
+  if (job.status === "failed") {
+    throw new Error(job.error || "Không thể xử lý video này.");
+  }
+  return job.result;
+}
+
+async function loadRecentLessons() {
+  try {
+    const lessons = await responseJson(await fetch("/api/lessons"));
+    recentList.replaceChildren();
+    recentEmpty.hidden = lessons.length > 0;
+    for (const item of lessons) {
+      const row = document.createElement("li");
+      const button = element("button", "recent-lesson");
+      button.type = "button";
+      button.append(
+        element("span", null, item.filename),
+        element("small", null, `${item.vocabulary_count} từ · ${item.transcript_method}`),
+      );
+      button.addEventListener("click", async () => {
+        try {
+          lesson = await responseJson(await fetch(`/api/lessons/${item.id}`));
+          if (videoUrl) URL.revokeObjectURL(videoUrl);
+          videoUrl = null;
+          video.removeAttribute("src");
+          video.load();
+          video.hidden = true;
+          placeholder.textContent =
+            "Bài học đã lưu. Chọn lại video gốc nếu bạn muốn phát đúng khoảnh khắc.";
+          placeholder.hidden = false;
+          renderLesson();
+        } catch (error) {
+          formNote.textContent = error.message;
+        }
+      });
+      row.append(button);
+      recentList.append(row);
+    }
+  } catch (error) {
+    recentEmpty.textContent = `Không thể đọc bài học đã lưu: ${error.message}`;
+  }
 }
 
 function showWord(id) {
@@ -173,7 +259,7 @@ function renderLesson() {
   dictionaryNotice.hidden = lesson.dictionary.loaded;
   dictionaryNotice.textContent = lesson.dictionary.loaded
     ? ""
-    : "Chưa tìm thấy CC-CEDICT. Pinyin vẫn hoạt động; nghĩa sẽ hiện sau khi đặt file cedict_ts.u8 vào data/dictionaries/.";
+    : "Từ điển offline chưa sẵn sàng. Chạy pnpm setup để cài dữ liệu CC-CEDICT miễn phí.";
   workspace.hidden = false;
   workspace.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -189,33 +275,22 @@ form.addEventListener("submit", async (event) => {
   video.src = videoUrl;
   video.hidden = false;
   placeholder.hidden = true;
-  formNote.textContent = subtitleFile
-    ? "Đang ghép phụ đề với video trên máy của bạn…"
-    : "Đang tách âm thanh và nhận dạng tiếng Trung trên máy. Video dài có thể mất vài phút…";
+  formNote.textContent = "Đang tải video vào bộ xử lý local…";
+  progressBox.hidden = false;
   try {
-    let response;
-    if (subtitleFile) {
-      response = await fetch("/api/lessons/mandarin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: await subtitleFile.text(),
-          filename: subtitleFile.name,
-          language: "zh",
-        }),
-      });
-    } else {
-      const body = new FormData();
-      body.append("video", mediaFile);
-      response = await fetch("/api/lessons/mandarin-video", { method: "POST", body });
-    }
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.detail || "Không thể xử lý video.");
-    lesson = result;
+    const body = new FormData();
+    body.append("video", mediaFile);
+    if (subtitleFile) body.append("subtitle", subtitleFile);
+    const job = await responseJson(
+      await fetch("/api/lessons/mandarin-video", { method: "POST", body }),
+    );
+    lesson = await waitForJob(job);
     renderLesson();
-    formNote.textContent = "Bài học đã sẵn sàng. Video và dữ liệu xử lý vẫn ở trên máy này.";
+    await loadRecentLessons();
+    formNote.textContent = "Bài học đã sẵn sàng và được tự động lưu trên máy này.";
   } catch (error) {
     formNote.textContent = error.message;
+    progressBox.hidden = true;
   } finally {
     form.querySelector("button").disabled = false;
   }
@@ -234,3 +309,5 @@ video.addEventListener("timeupdate", () => {
   document.querySelectorAll(".cue-row.is-active").forEach((row) => row.classList.remove("is-active"));
   if (active) document.querySelector(`[data-start="${lesson.cues.find((cue) => cue.id === active).start_ms}"]`)?.classList.add("is-active");
 });
+
+loadRecentLessons();

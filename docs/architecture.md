@@ -16,9 +16,7 @@ browser
   -> SQLite + local object directory
 ```
 
-## Proposed implementation stack
-
-The exact package versions will be pinned when the first vertical slice starts.
+## Implementation stack
 
 | Area | Default | Why |
 | --- | --- | --- |
@@ -36,6 +34,14 @@ for processing. The API prefers a suitable embedded Mandarin subtitle stream and
 otherwise extracts mono 16 kHz audio for local faster-whisper transcription. An
 uploaded SRT/VTT remains an optional fast path. A framework becomes justified when
 UI state or reuse exceeds what the small native client can keep clear.
+
+Video jobs are fingerprinted and processed in a local worker thread so long ASR
+does not hold the browser request open. SQLite stores observable job state and the
+completed lesson. Re-uploading the same video/settings reuses the completed result.
+Raw video and derived audio live only in the per-job temporary directory and are
+deleted after success or failure. If the local server stops mid-job, startup reads
+the durable record and resumes processing from the retained source; unrelated
+orphan job directories are removed.
 
 Do not add Redis, Kafka, Kubernetes, a vector database, microservices, or a cloud
 object store until measured requirements make the local design insufficient.

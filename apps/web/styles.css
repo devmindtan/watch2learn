@@ -32,6 +32,18 @@ h1 { font-family: Georgia, "Times New Roman", serif; font-size: clamp(2.7rem, 6v
 .import-card button:hover { background: var(--jade-dark); }
 .import-card button:disabled { opacity: .55; cursor: wait; }
 .form-note { min-height: 2.8em; color: var(--muted); font-size: .86rem; line-height: 1.4; margin: 14px 0 0; }
+.job-progress { margin-top: 14px; padding: 12px; border-radius: 12px; background: var(--jade-soft); color: var(--jade-dark); }
+.job-progress > div { display: flex; justify-content: space-between; gap: 12px; font-size: .8rem; margin-bottom: 8px; }
+.job-progress progress { display: block; width: 100%; accent-color: var(--jade); }
+.recent-lessons { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 16px; }
+.recent-lessons h2 { font-size: .86rem; }
+.recent-lessons p { color: var(--muted); font-size: .8rem; margin-bottom: 0; }
+.recent-lessons ol { list-style: none; padding: 0; margin: 8px 0 0; }
+.recent-lessons li + li { border-top: 1px solid var(--line); }
+.recent-lesson { width: 100%; display: grid; gap: 2px; border: 0; background: transparent; padding: 9px 2px; text-align: left; color: var(--ink); }
+.recent-lesson:hover, .recent-lesson:focus-visible { color: var(--jade); }
+.recent-lesson span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-lesson small { color: var(--muted); }
 .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 390px; gap: 28px; align-items: start; padding-top: 42px; scroll-margin-top: 20px; }
 .learning-column, .vocabulary-panel { min-width: 0; }
 .player-shell { background: #111; border-radius: 18px; overflow: hidden; aspect-ratio: 16 / 9; display: grid; place-items: center; }
@@ -75,6 +87,7 @@ h2 { margin: 0; font-size: 1.35rem; }
 .word-row small { color: var(--jade); }
 .word-row:hover { background: var(--jade-soft); }
 .word-row.is-known { opacity: .48; }
+.dictionary-credit { color: var(--muted); font-size: .68rem; line-height: 1.4; margin: 14px 0 0; }
 
 @media (max-width: 960px) {
   .intro, .workspace { grid-template-columns: 1fr; }

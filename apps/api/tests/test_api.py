@@ -46,7 +46,7 @@ def test_invalid_subtitle_returns_useful_error():
     assert "No valid" in response.json()["detail"]
 
 
-def test_video_without_subtitle_uses_local_asr(monkeypatch):
+def test_video_without_subtitle_runs_durable_job_and_reuses_result(monkeypatch, tmp_path):
     audio = io.BytesIO()
     with wave.open(audio, "wb") as output:
         output.setnchannels(1)
@@ -54,8 +54,10 @@ def test_video_without_subtitle_uses_local_asr(monkeypatch):
         output.setframerate(16_000)
         output.writeframes(b"\0\0" * 16_000)
 
-    def fake_transcribe(path):
+    def fake_transcribe(path, on_progress=None):
         assert path.name == "speech.wav"
+        if on_progress:
+            on_progress(1.0)
         return [Cue("cue-1", 0, 1200, "你好，欢迎学习中文。")], {"method": "test-asr"}
 
     async def run_inline(function, *args):
@@ -63,15 +65,34 @@ def test_video_without_subtitle_uses_local_asr(monkeypatch):
 
     monkeypatch.setattr(app_module, "transcribe_mandarin", fake_transcribe)
     monkeypatch.setattr(app_module.asyncio, "to_thread", run_inline)
-    response = asyncio.run(
-        request(
-            "POST",
-            "/api/lessons/mandarin-video",
-            files={"video": ("lesson.wav", audio.getvalue(), "audio/wav")},
-        )
-    )
+    monkeypatch.setattr(app_module.jobs, "DB_PATH", tmp_path / "watch2learn.sqlite3")
+    monkeypatch.setattr(app_module, "JOBS_ROOT", tmp_path / "jobs")
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["transcript"]["method"] == "test-asr"
-    assert payload["cues"][0]["text"] == "你好，欢迎学习中文。"
+    async def scenario():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            files = {"video": ("lesson.wav", audio.getvalue(), "audio/wav")}
+            response = await client.post("/api/lessons/mandarin-video", files=files)
+            assert response.status_code == 202
+            job = response.json()
+            for _ in range(100):
+                status = (await client.get(f"/api/jobs/{job['id']}")).json()
+                if status["status"] not in {"queued", "processing"}:
+                    break
+                await asyncio.sleep(0.02)
+
+            assert status["status"] == "complete"
+            assert status["result"]["transcript"]["method"] == "test-asr"
+            assert status["result"]["cues"][0]["text"] == "你好，欢迎学习中文。"
+
+            reused = await client.post("/api/lessons/mandarin-video", files=files)
+            assert reused.json()["id"] == job["id"]
+            assert reused.json()["status"] == "complete"
+
+            lessons = (await client.get("/api/lessons")).json()
+            assert lessons[0]["id"] == job["id"]
+            saved = (await client.get(f"/api/lessons/{job['id']}")).json()
+            assert saved["vocabulary"]
+
+    asyncio.run(scenario())
+    assert not list((tmp_path / "jobs").iterdir())

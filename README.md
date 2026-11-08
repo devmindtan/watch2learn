@@ -23,31 +23,26 @@ languages can be added later.
 
 ## Repository status
 
-The first vertical slice is working: a local web UI accepts a Mandarin video,
-prefers embedded or optional SRT/WebVTT subtitles, and otherwise transcribes audio
-locally. It extracts timestamped vocabulary with Jieba and pypinyin, preserves
-neighboring cue context, and uses CC-CEDICT when a local dictionary is present.
+The local MVP accepts a Mandarin video, shows durable processing progress, prefers
+embedded or optional SRT/WebVTT subtitles, and otherwise transcribes audio locally.
+It extracts timestamped vocabulary with Jieba and pypinyin, preserves neighboring
+cue context, adds offline CC-CEDICT meanings, and saves completed lessons in SQLite.
 
 ## Start here
 
 ```bash
-bash scripts/bootstrap-media-tools.sh # only when ffmpeg is not already installed
-uv sync --group asr
-pnpm setup:asr                     # explicit one-time model download (~484 MB)
+pnpm setup                          # one-time local tool/model/dictionary setup
 pnpm dev
 ```
 
 Open <http://127.0.0.1:8000> and choose a local Mandarin video. A subtitle file is
-optional. The media is processed only by the local API and temporary job files are
-deleted after the lesson is built.
-
-For offline English meanings, manually place CC-CEDICT at
-`data/dictionaries/cedict_ts.u8`; see [the dictionary instructions](data/dictionaries/README.md).
+optional. Processing runs as a local background job, completed lessons are saved,
+and temporary media/audio files are deleted after the lesson is built.
 
 Run checks with:
 
 ```bash
-bash scripts/doctor.sh
+pnpm run doctor
 pnpm policy:free
 pnpm quality
 ```

@@ -40,6 +40,18 @@
           <p id="form-note" class="form-note">
             Không cần phụ đề, tài khoản hay API key. Video được gửi tới bộ xử lý local trên máy này.
           </p>
+          <div id="job-progress" class="job-progress" hidden>
+            <div>
+              <span id="job-stage">Đang chuẩn bị…</span>
+              <strong id="job-percent">0%</strong>
+            </div>
+            <progress id="job-progress-bar" max="100" value="0">0%</progress>
+          </div>
+          <section class="recent-lessons" aria-labelledby="recent-title">
+            <h2 id="recent-title">Bài học gần đây</h2>
+            <p id="recent-empty">Chưa có bài học nào được lưu trên máy này.</p>
+            <ol id="recent-list"></ol>
+          </section>
         </form>
       </section>
 
@@ -77,6 +89,9 @@
             Chọn một từ trong transcript hoặc danh sách bên dưới.
           </div>
           <ol id="vocabulary-list" class="vocabulary-list"></ol>
+          <p class="dictionary-credit">
+            Nghĩa tiếng Anh từ CC-CEDICT · CC BY-SA 4.0
+          </p>
         </aside>
       </section>
     </main>

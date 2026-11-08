@@ -3,6 +3,29 @@
 This is a compact evidence log, not a diary. Add an entry after a user correction,
 a defect that escaped a completed check, or a manual task repeated at least twice.
 
+## 2026-11-08 — Model load did not prove that real audio could be decoded
+
+- Evidence: the model loaded and mocked ASR tests passed, but a real Mandarin WAV
+  failed because faster-whisper 1.2.1 passed a removed argument to PyAV 19.
+- Root cause: dependency compatibility was tested only at import/model-load level,
+  not through the decoder used by an actual media file.
+- Reusable rule: every local media/ML stack needs one real-format decode or
+  inference smoke test; pin a compatible transitive version when upstream has not
+  released its fix.
+- Verification: the ASR dependency group pins PyAV 18.1.0 and the test suite
+  decodes a generated WAV through `faster_whisper.audio.decode_audio`.
+
+## 2026-11-08 — Unified setup downloaded repo-local FFmpeg again
+
+- Evidence: `pnpm setup` downloaded the 133 MB FFmpeg archive even though verified
+  executables already existed under `.tools/bin`.
+- Root cause: the bootstrap checked only the shell `PATH`, not its own install
+  destination.
+- Reusable rule: every explicit bootstrap must be idempotent by validating its
+  output path before any network request.
+- Verification: rerunning `pnpm setup` reports all three local assets ready and
+  performs no download.
+
 ## 2026-11-08 — Subtitle upload was incorrectly made the primary input
 
 - Evidence: the completed first UI required an SRT/VTT file; the user corrected
