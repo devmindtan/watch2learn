@@ -55,13 +55,24 @@
               <span>Link video YouTube</span>
               <input id="youtube-url" type="url" inputmode="url" autocomplete="off" placeholder="https://www.youtube.com/watch?v=…" />
             </label>
+            <fieldset class="choice">
+              <legend>Lấy chữ tiếng Trung từ</legend>
+              <label class="check">
+                <input type="radio" name="youtube-transcript" value="subtitles" checked />
+                <span><strong>Phụ đề có sẵn của video</strong> — nhanh (vài giây), nhưng phụ đề do người đăng làm có thể sai hoặc lẫn chữ rác.</span>
+              </label>
+              <label class="check">
+                <input type="radio" name="youtube-transcript" value="asr" />
+                <span><strong>Máy tự nghe giọng nói</strong> — chậm hơn (khoảng 1/3 độ dài video), thường chính xác hơn; lời nói tiếng khác giữ nguyên.</span>
+              </label>
+            </fieldset>
             <label class="check">
               <input id="youtube-rights" type="checkbox" />
               <span>Tôi có quyền sử dụng video này (video của tôi, có giấy phép, hoặc chủ sở hữu cho phép tải về).</span>
             </label>
             <p class="hint">
-              Xem trực tiếp trên YouTube. Nếu người đăng có phụ đề tiếng Trung thì dùng luôn;
-              nếu không, máy tải phần âm thanh về để tự nhận dạng. Có thể tải video về máy trong bài học.
+              Xem trực tiếp trên YouTube. Nếu video không có phụ đề tiếng Trung, máy luôn tự nghe.
+              Có thể tải video về máy trong bài học.
             </p>
           </div>
           <button class="primary-button" type="submit">Tạo bài học</button>

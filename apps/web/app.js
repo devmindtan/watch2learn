@@ -355,7 +355,45 @@ function renderSourceBar() {
   } else if (!media.available) {
     parts.push(element("span", "muted", "Chưa lưu video cho bài học này."));
   }
+  if (isYoutube && lesson.transcript?.method === "youtube-subtitle") {
+    if (state.relisten?.status === "running") {
+      actions.append(element("span", "muted", `Máy đang nghe lại… ${state.relisten.progress || 0}%`));
+    } else {
+      if (state.relisten?.error) actions.append(element("span", "source-error", state.relisten.error));
+      const relisten = button("control-button", "Phụ đề sai? Để máy tự nghe lại", startRelisten);
+      relisten.title = "Tạo bài học mới từ giọng nói trong video thay vì phụ đề của người đăng";
+      actions.append(relisten);
+    }
+  }
   sourceBar.replaceChildren(...parts, actions);
+}
+
+async function startRelisten() {
+  const lesson = state.lesson;
+  state.relisten = { status: "running", progress: 0 };
+  renderSourceBar();
+  try {
+    let job = await responseJson(
+      await fetch("/api/lessons/youtube", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: lesson.source.url, confirm_rights: true, transcript: "asr" }),
+      }),
+    );
+    while (job.status === "queued" || job.status === "processing") {
+      await delay(1000);
+      job = await responseJson(await fetch(`/api/jobs/${job.id}`));
+      if (state.lesson !== lesson) return;
+      state.relisten = { status: "running", progress: job.progress };
+      renderSourceBar();
+    }
+    if (job.status === "failed") throw new Error(job.error || "Không thể nghe lại video này.");
+    state.relisten = null;
+    if (state.lesson === lesson) await openSavedLesson(job.id);
+  } catch (error) {
+    state.relisten = { status: "failed", error: error.message };
+    if (state.lesson === lesson) renderSourceBar();
+  }
 }
 
 async function startDownload() {
@@ -584,7 +622,11 @@ async function submitLesson() {
       await fetch("/api/lessons/youtube", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: youtubeUrl.value.trim(), confirm_rights: true }),
+        body: JSON.stringify({
+          url: youtubeUrl.value.trim(),
+          confirm_rights: true,
+          transcript: form.querySelector("[name=youtube-transcript]:checked")?.value || "subtitles",
+        }),
       }),
     );
   }
@@ -650,6 +692,7 @@ function openLesson(lesson) {
     clipEnd: null,
     preferYoutube: false,
     download: null,
+    relisten: null,
   });
   wordsById.clear();
   cueIndexById.clear();
@@ -729,7 +772,8 @@ function renderTranscript() {
   cueCount.textContent = cues.length;
   transcript.replaceChildren(
     ...cues.map((cue, index) => {
-      const row = element("li", `cue-row${endsTranslationGroup(cue) ? "" : " continues"}`);
+      const ends = endsTranslationGroup(cue);
+      const row = element("li", `cue-row${ends ? "" : " continues"}`);
       row.dataset.index = index;
       const time = button("cue-time", timeLabel(cue.start_ms), () => playFromCue(index));
       time.setAttribute("aria-label", `Phát từ ${timeLabel(cue.start_ms)}`);
@@ -738,7 +782,8 @@ function renderTranscript() {
       text.lang = "zh";
       renderCueText(text, cue, { compact: true });
       body.append(text);
-      if (endsTranslationGroup(cue)) {
+      if (!ends) body.append(element("p", "cue-translation continues-note", "↓ câu còn tiếp — dịch chung với dòng dưới"));
+      if (ends) {
         const translation = element("p", "cue-translation translation");
         translation.dataset.translationFor = cue.id;
         updateTranslationNode(translation, cue);
@@ -1132,7 +1177,7 @@ async function backfillTranslations() {
   const lesson = state.lesson;
   if (!state.health?.translation_model_ready) return;
   const complete = lesson.cues.every((cue) => typeof cue.translation_vi === "string");
-  if (lesson.translation?.unit === "zh-sentence" && complete) return;
+  if (lesson.translation?.unit === state.health.translation_unit && complete) return;
   try {
     const result = await responseJson(await fetch(`/api/lessons/${lesson.id}/translations`, { method: "POST" }));
     lesson.translation = result.translation;

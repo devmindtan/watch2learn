@@ -18,7 +18,7 @@ MARKUP_RE = re.compile(r"\{\\[^}]*\}|<[^>]{1,40}>")
 HAN_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 NON_HAN_LETTERS_RE = re.compile(r"[^\W\d_\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+")
 KANA_HANGUL_RE = re.compile(r"[\u3040-\u30ff\u31f0-\u31ff\uac00-\ud7af\u1100-\u11ff]")
-TRANSLATION_UNIT = "zh-sentence"
+TRANSLATION_UNIT = "zh-cue-v3"
 
 
 def chinese_source(text: str) -> str:
@@ -111,7 +111,9 @@ def translate_to_vietnamese(texts: list[str]) -> list[str]:
     return results
 
 
-SENTENCE_END = tuple('。！？!?…；;」』”"）)】]')
+# Subtitle cues are usually whole sentences (and Chinese subtitles often omit
+# punctuation), so only an explicit trailing comma/colon/dash marks a split sentence.
+CONTINUATION_END = tuple("，,、：:—")
 MAX_GROUP_GAP_MS = 700
 MAX_GROUP_CHARACTERS = 60
 MAX_GROUP_CUES = 3
@@ -120,8 +122,8 @@ MAX_GROUP_CUES = 3
 def sentence_groups(cues: list) -> list[list[int]]:
     """Join cues that split one sentence so it is translated as a whole.
 
-    A cue continues into the next when both are Chinese, it lacks closing
-    punctuation, the pause is short, and the joined text stays sentence-sized.
+    A cue continues into the next when both are Chinese, it ends with a comma-like
+    mark, the pause is short, and the joined text stays sentence-sized.
     """
     chinese = [bool(chinese_source(cue.text)) for cue in cues]
     groups: list[list[int]] = []
@@ -135,7 +137,7 @@ def sentence_groups(cues: list) -> list[list[int]]:
             following is not None
             and chinese[index]
             and chinese[index + 1]
-            and not cue.text.rstrip().endswith(SENTENCE_END)
+            and cue.text.rstrip().endswith(CONTINUATION_END)
             and following.start_ms - cue.end_ms <= MAX_GROUP_GAP_MS
             and length + len(following.text) <= MAX_GROUP_CHARACTERS
             and len(current) < MAX_GROUP_CUES

@@ -11,7 +11,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from threading import Lock
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -37,9 +37,11 @@ MAX_VIDEO_BYTES = 4 * 1024 * 1024 * 1024
 MEDIA_SUFFIXES = storage.MEDIA_SUFFIXES
 JOBS_ROOT = PROJECT_ROOT / "data" / "jobs"
 YOUTUBE_SOURCE_PREFIX = "youtube:"
+YOUTUBE_ASR_SOURCE_PREFIX = "youtube-asr:"
 RUNNING_TASKS: set[asyncio.Task] = set()
 DOWNLOADS: dict[str, dict] = {}
 DOWNLOADS_LOCK = Lock()
+TRANSLATION_UPGRADE_LOCK = Lock()
 logger = logging.getLogger(__name__)
 Report = Callable[[str, int], None]
 
@@ -52,6 +54,9 @@ def no_report(_stage: str, _progress: int) -> None:
 async def lifespan(_app: FastAPI):
     resume_pending_jobs()
     cleanup_abandoned_job_files()
+    task = asyncio.create_task(asyncio.to_thread(upgrade_saved_lessons))
+    RUNNING_TASKS.add(task)
+    task.add_done_callback(RUNNING_TASKS.discard)
     yield
 
 
@@ -77,6 +82,7 @@ class LessonRequest(BaseModel):
 class YoutubeLessonRequest(BaseModel):
     url: str = Field(min_length=11, max_length=500)
     confirm_rights: bool = False
+    transcript: Literal["subtitles", "asr"] = "subtitles"
 
 
 def translate_cues(cues: list[Cue]) -> tuple[list[dict] | None, dict]:
@@ -112,6 +118,7 @@ async def health() -> dict:
         "vietnamese_dictionary_loaded": load_vietnamese().source is not None,
         "asr_model_ready": model_ready(),
         "translation_model_ready": translation.model_ready(),
+        "translation_unit": translation.TRANSLATION_UNIT,
     }
 
 
@@ -148,7 +155,9 @@ async def save_upload(upload: UploadFile, destination: Path, limit: int) -> tupl
 
 def transcribe_media(source: Path, work_dir: Path, report: Report) -> dict:
     report("extracting-audio", 30)
-    audio_path = extract_asr_audio(source, work_dir / "speech.wav")
+    speech = work_dir / "speech.wav"
+    speech.unlink(missing_ok=True)  # a resumed job may have left a partial file
+    audio_path = extract_asr_audio(source, speech)
     report("transcribing-mandarin", 40)
     cues, transcript = transcribe_mandarin(
         audio_path,
@@ -179,9 +188,9 @@ def process_video(
     if subtitle_index is not None:
         report("reading-embedded-subtitle", 25)
         try:
-            subtitle_path = extract_embedded_subtitles(
-                source, subtitle_index, work_dir / "embedded.vtt"
-            )
+            embedded = work_dir / "embedded.vtt"
+            embedded.unlink(missing_ok=True)
+            subtitle_path = extract_embedded_subtitles(source, subtitle_index, embedded)
             cues = parse_subtitles(subtitle_path.read_text(encoding="utf-8-sig"))
             transcript = {"method": "embedded-subtitle", "stream_index": subtitle_index}
         except (OSError, UnicodeDecodeError, ValueError, subprocess.SubprocessError):
@@ -194,8 +203,10 @@ def process_video(
     return transcribe_media(source, work_dir, report)
 
 
-def process_youtube(video_id: str, work_dir: Path, report: Report | None = None) -> dict:
-    """Prefer uploader-provided Chinese subtitles, otherwise transcribe the audio locally."""
+def process_youtube(
+    video_id: str, work_dir: Path, report: Report | None = None, use_subtitles: bool = True
+) -> dict:
+    """Prefer uploader-provided Chinese subtitles unless asked to transcribe locally."""
     report = report or no_report
     report("fetching-youtube", 8)
     metadata = youtube.fetch_metadata(video_id)
@@ -207,7 +218,7 @@ def process_youtube(video_id: str, work_dir: Path, report: Report | None = None)
         "channel": metadata["channel"],
     }
     common = {"filename": metadata["title"], "source": source}
-    language = youtube.choose_subtitle(metadata["subtitles"])
+    language = youtube.choose_subtitle(metadata["subtitles"]) if use_subtitles else None
     if language:
         report("reading-youtube-subtitle", 20)
         try:
@@ -242,7 +253,10 @@ def run_video_job(
 
     try:
         source_text = str(source)
-        if source_text.startswith(YOUTUBE_SOURCE_PREFIX):
+        if source_text.startswith(YOUTUBE_ASR_SOURCE_PREFIX):
+            video_id = source_text.removeprefix(YOUTUBE_ASR_SOURCE_PREFIX)
+            lesson = process_youtube(video_id, work_dir, report, use_subtitles=False)
+        elif source_text.startswith(YOUTUBE_SOURCE_PREFIX):
             video_id = source_text.removeprefix(YOUTUBE_SOURCE_PREFIX)
             lesson = process_youtube(video_id, work_dir, report)
         else:
@@ -273,7 +287,8 @@ def resume_pending_jobs() -> None:
         work_dir = Path(item["work_dir"])
         subtitle = Path(item["subtitle_path"]) if item["subtitle_path"] else None
         inside_jobs = work_dir.parent.resolve() == JOBS_ROOT.resolve()
-        if source_text.startswith(YOUTUBE_SOURCE_PREFIX) and inside_jobs:
+        is_youtube = source_text.startswith((YOUTUBE_SOURCE_PREFIX, YOUTUBE_ASR_SOURCE_PREFIX))
+        if is_youtube and inside_jobs:
             work_dir.mkdir(parents=True, exist_ok=True)
             start_job(item["id"], item["filename"], source_text, work_dir, None)
         elif Path(source_text).is_file() and inside_jobs:
@@ -345,13 +360,14 @@ async def create_youtube_lesson(request: YoutubeLessonRequest) -> dict:
         video_id = youtube.parse_video_id(request.url)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    fingerprint = fingerprint_for(YOUTUBE_SOURCE_PREFIX + video_id)
+    prefix = YOUTUBE_ASR_SOURCE_PREFIX if request.transcript == "asr" else YOUTUBE_SOURCE_PREFIX
+    source = prefix + video_id
+    fingerprint = fingerprint_for(source)
     existing = jobs.find_completed(fingerprint)
     if existing:
         return existing
     JOBS_ROOT.mkdir(parents=True, exist_ok=True)
     work_dir = Path(tempfile.mkdtemp(prefix="lesson-", dir=JOBS_ROOT))
-    source = YOUTUBE_SOURCE_PREFIX + video_id
     filename = f"YouTube {video_id}"
     job = jobs.create(fingerprint, filename, work_dir, source, None)
     start_job(job["id"], filename, source, work_dir, None)
@@ -383,9 +399,9 @@ def completed_lesson(lesson_id: str) -> dict:
 
 @app.get("/api/lessons/{lesson_id}")
 async def saved_lesson(lesson_id: str) -> dict:
-    lesson = add_vietnamese_definitions(
-        completed_lesson(lesson_id), load_cedict(), load_vietnamese()
-    )
+    completed_lesson(lesson_id)
+    current = await asyncio.to_thread(ensure_current_analysis, lesson_id)
+    lesson = add_vietnamese_definitions(current, load_cedict(), load_vietnamese())
     lesson.setdefault("source", {"kind": "file", "filename": lesson.get("filename")})
     return lesson | {"id": lesson_id, "media": storage.media_info(lesson_id)}
 
@@ -484,28 +500,89 @@ async def lesson_download_status(lesson_id: str) -> dict:
     return download_status(lesson_id)
 
 
+def translation_is_current(lesson: dict) -> bool:
+    current = lesson.get("translation") or {}
+    complete = all(cue.get("translation_vi") is not None for cue in lesson.get("cues", []))
+    return current.get("unit") == translation.TRANSLATION_UNIT and complete
+
+
+def ensure_current_translation(lesson_id: str) -> dict | None:
+    """Translate a saved lesson once under the current rules and persist it."""
+    with TRANSLATION_UPGRADE_LOCK:  # one upgrade at a time; re-read after waiting
+        job = jobs.get(lesson_id)
+        if not job or job["status"] != "complete":
+            return None
+        lesson = job["result"]
+        if translation_is_current(lesson):
+            return lesson
+        cues = [
+            Cue(cue["id"], cue["start_ms"], cue["end_ms"], cue["text"]) for cue in lesson["cues"]
+        ]
+        rows, details = translate_cues(cues)
+        if rows is None:
+            raise RuntimeError("Không thể dịch bài học này")
+        for cue, row in zip(lesson["cues"], rows, strict=True):
+            cue.update(row)
+        lesson["translation"] = details
+        jobs.save_result(lesson_id, lesson)
+        return lesson
+
+
+TRANSLATION_FIELDS = ("translation_vi", "translation_skipped", "translation_group")
+TRANSLATION_FIELDS += ("translation_group_end",)
+
+
+def ensure_current_analysis(lesson_id: str) -> dict | None:
+    """Re-run segmentation/readings/meanings on a lesson saved by an older analyser.
+
+    Original cue text, timing and stored translations are kept; vocabulary IDs are
+    content hashes, so learner known-word state still matches.
+    """
+    with TRANSLATION_UPGRADE_LOCK:
+        job = jobs.get(lesson_id)
+        if not job or job["status"] != "complete":
+            return None
+        lesson = job["result"]
+        if lesson.get("analysis", {}).get("version") == ANALYSIS_VERSION:
+            return lesson
+        stored = lesson["cues"]
+        cues = [Cue(cue["id"], cue["start_ms"], cue["end_ms"], cue["text"]) for cue in stored]
+        rows = [{key: cue.get(key) for key in TRANSLATION_FIELDS} for cue in stored]
+        rebuilt = build_lesson(
+            cues, load_cedict(), load_vietnamese(), rows, lesson.get("translation")
+        )
+        lesson.update(rebuilt)
+        jobs.save_result(lesson_id, lesson)
+        return lesson
+
+
+def upgrade_saved_lessons() -> None:
+    """At startup, bring every saved lesson to the current analysis and translation
+    rules in the background so opening a lesson never waits for it."""
+    for lesson_id in jobs.completed_ids():
+        try:
+            ensure_current_analysis(lesson_id)
+            if translation.model_ready():
+                ensure_current_translation(lesson_id)
+        except Exception as error:  # keep upgrading the remaining lessons
+            logger.warning("Could not upgrade translation of %s: %s", lesson_id, error)
+
+
 @app.post("/api/lessons/{lesson_id}/translations")
 async def translate_saved_lesson(lesson_id: str) -> dict:
-    """Re-translate an older lesson sentence-by-sentence and persist the result."""
-    lesson = completed_lesson(lesson_id)
+    """Re-translate an older lesson under the current rules and persist the result."""
+    completed_lesson(lesson_id)
     if not translation.model_ready():
         raise HTTPException(
             status_code=503,
             detail="Mô hình dịch offline chưa được cài. Chạy pnpm setup:translation.",
         )
-    current = lesson.get("translation") or {}
-    complete = all(cue.get("translation_vi") is not None for cue in lesson["cues"])
-    if not (current.get("unit") == translation.TRANSLATION_UNIT and complete):
-        cues = [
-            Cue(cue["id"], cue["start_ms"], cue["end_ms"], cue["text"]) for cue in lesson["cues"]
-        ]
-        rows, details = await asyncio.to_thread(translate_cues, cues)
-        if rows is None:
-            raise HTTPException(status_code=503, detail="Không thể dịch bài học này")
-        for cue, row in zip(lesson["cues"], rows, strict=True):
-            cue.update(row)
-        lesson["translation"] = details
-        jobs.save_result(lesson_id, lesson)
+    try:
+        lesson = await asyncio.to_thread(ensure_current_translation, lesson_id)
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    if lesson is None:
+        raise HTTPException(status_code=404, detail="Completed lesson was not found")
     return {
         "translation": lesson["translation"],
         "cues": [

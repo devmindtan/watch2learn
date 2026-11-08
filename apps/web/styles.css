@@ -85,6 +85,9 @@ main { width: min(1560px, 100%); margin: 0 auto; }
 .field input { min-height: 46px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: 10px; font-weight: 400; }
 .check { display: flex; gap: 10px; align-items: flex-start; font-size: .9rem; cursor: pointer; }
 .check input { margin-top: 3px; accent-color: var(--jade); width: 18px; height: 18px; flex: none; }
+.choice { margin: 0; padding: 0; border: 0; display: grid; gap: 8px; }
+.choice legend { margin-bottom: 6px; font-weight: 650; }
+.continues-note { font-size: .78rem; font-style: italic; opacity: .75; }
 .hint { margin: 0; color: var(--muted); font-size: .84rem; }
 .dropzone {
   position: relative; display: grid; justify-items: center; gap: 6px; padding: 32px 18px; text-align: center;

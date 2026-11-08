@@ -8,17 +8,17 @@ from watch2learn.app import app
 from watch2learn.subtitles import Cue
 
 
-def test_cues_split_mid_sentence_are_translated_together():
+def test_only_comma_continued_cues_are_translated_together():
     cues = [
-        Cue("cue-1", 0, 1000, "我昨天去了一家"),
-        Cue("cue-2", 1200, 2500, "很有名的餐厅。"),
-        Cue("cue-3", 2600, 3500, "你呢？"),
-        Cue("cue-4", 9000, 9500, "我"),
-        Cue("cue-5", 12000, 13000, "也去了"),
-        Cue("cue-6", 13100, 14000, "（轻轻地哼着歌）"),
-        Cue("cue-7", 14100, 15000, "王雨，你好吗？"),
+        Cue("cue-1", 0, 1000, "如果明天不下雨，"),
+        Cue("cue-2", 1200, 2500, "我们就去爬山。"),
+        Cue("cue-3", 2600, 3500, "今天放学以后我一个人回家"),
+        Cue("cue-4", 3600, 4500, "天气很好"),
+        Cue("cue-5", 4600, 5000, "我走的很慢，"),
+        Cue("cue-6", 9000, 10000, "停下来。"),
     ]
-    assert translation.sentence_groups(cues) == [[0, 1], [2], [3], [4, 5], [6]]
+    # Unpunctuated cues are whole sentences in real subtitles; a long pause ends a group.
+    assert translation.sentence_groups(cues) == [[0, 1], [2], [3], [4], [5]]
     assert translation.join_cue_text(["我昨天去了一家", "很有名的餐厅。"]) == (
         "我昨天去了一家，很有名的餐厅。"
     )
@@ -33,9 +33,9 @@ def test_context_rows_share_one_sentence_translation(monkeypatch):
 
     monkeypatch.setattr(translation, "translate_to_vietnamese", fake_translate)
     rows = translation.translate_cues_in_context(
-        [Cue("a", 0, 1000, "如果明天不下雨"), Cue("b", 1100, 2000, "我们就去爬山。")]
+        [Cue("a", 0, 1000, "如果明天不下雨，"), Cue("b", 1100, 2000, "我们就去爬山。")]
     )
-    assert seen == ["如果明天不下雨，我们就去爬山。"]
+    assert seen == ["如果明天不下雨，我们就去爬山。"]  # no doubled comma
     assert rows[0] == rows[1]
     assert rows[0]["translation_group"] == "a"
     assert rows[0]["translation_group_end"] == "b"
@@ -68,7 +68,7 @@ def test_saved_lesson_translation_backfill_is_persisted(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert [cue["translation_vi"] for cue in response.json()["cues"]] == ["vi:你好。", "vi:再见。"]
     saved = app_module.jobs.get(job["id"])["result"]
-    assert saved["translation"]["unit"] == "zh-sentence"
+    assert saved["translation"]["unit"] == translation.TRANSLATION_UNIT
     assert saved["cues"][1]["translation_vi"] == "vi:再见。"
 
 
@@ -108,7 +108,7 @@ def test_only_chinese_is_sent_for_translation(monkeypatch):
     monkeypatch.setattr(translation, "translate_to_vietnamese", fake_translate)
     rows = translation.translate_cues_in_context(
         [
-            Cue("a", 0, 1000, "如果明天不下雨"),
+            Cue("a", 0, 1000, "如果明天不下雨，"),
             Cue("b", 1100, 2000, "OK, let's go"),
             Cue("c", 2100, 3000, "我们就去爬山。"),
         ]
@@ -118,3 +118,52 @@ def test_only_chinese_is_sent_for_translation(monkeypatch):
     assert rows[1]["translation_skipped"] == "not-chinese"
     assert rows[0]["translation_group_end"] == "a"  # foreign line breaks the sentence group
     assert rows[2]["translation_vi"] == "vi:我们就去爬山。"
+
+
+def test_startup_upgrade_translates_saved_lessons_once(monkeypatch, tmp_path):
+    monkeypatch.setattr(app_module.jobs, "DB_PATH", tmp_path / "db.sqlite3")
+    monkeypatch.setattr(translation, "model_ready", lambda: True)
+    calls = []
+
+    def fake_translate(texts):
+        calls.append(texts)
+        return [f"vi:{text}" for text in texts]
+
+    monkeypatch.setattr(translation, "translate_to_vietnamese", fake_translate)
+    job = app_module.jobs.create("fp", "old.mp4", tmp_path, tmp_path / "x.mp4", None)
+    cue = {"id": "cue-1", "start_ms": 0, "end_ms": 900, "text": "你好。", "translation_vi": "cũ"}
+    app_module.jobs.complete(job["id"], {"cues": [cue], "vocabulary": []})
+
+    app_module.upgrade_saved_lessons()
+    app_module.upgrade_saved_lessons()
+
+    assert len(calls) == 1
+    saved = app_module.jobs.get(job["id"])["result"]
+    assert saved["cues"][0]["translation_vi"] == "vi:你好。"
+    assert app_module.translation_is_current(saved)
+
+
+def test_old_lessons_get_context_readings_without_losing_text_or_translation(monkeypatch, tmp_path):
+    monkeypatch.setattr(app_module.jobs, "DB_PATH", tmp_path / "db.sqlite3")
+    monkeypatch.setattr(translation, "model_ready", lambda: False)
+    job = app_module.jobs.create("fp", "old.mp4", tmp_path, tmp_path / "x.mp4", None)
+    old_cue = {
+        "id": "cue-1",
+        "start_ms": 6220,
+        "end_ms": 9000,
+        "text": "上一集,我撿到了一個手機",
+        "translation_vi": "Tập trước, tôi nhặt được một cái điện thoại.",
+        "segments": [{"text": "上", "vocabulary_id": "x", "pinyin": "shǎng"}],
+    }
+    app_module.jobs.complete(job["id"], {"cues": [old_cue], "vocabulary": [], "filename": "a"})
+
+    app_module.upgrade_saved_lessons()
+
+    saved = app_module.jobs.get(job["id"])["result"]
+    cue = saved["cues"][0]
+    assert cue["text"] == old_cue["text"] and cue["start_ms"] == 6220
+    assert cue["translation_vi"] == old_cue["translation_vi"]
+    segment = next(item for item in cue["segments"] if item["text"] == "上")
+    assert segment["pinyin"] == "shàng"
+    assert saved["analysis"]["version"] == app_module.ANALYSIS_VERSION
+    assert saved["filename"] == "a"

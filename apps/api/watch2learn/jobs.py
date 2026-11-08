@@ -166,6 +166,15 @@ def get(job_id: str) -> dict | None:
     return serialize(row) if row else None
 
 
+def completed_ids() -> list[str]:
+    initialize()
+    with connect() as connection:
+        rows = connection.execute(
+            "SELECT id FROM jobs WHERE status = 'complete' ORDER BY updated_at DESC"
+        ).fetchall()
+    return [row["id"] for row in rows]
+
+
 def recent_lessons(limit: int = 30) -> list[dict]:
     initialize()
     with connect() as connection:

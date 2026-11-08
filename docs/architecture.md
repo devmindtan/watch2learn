@@ -52,9 +52,11 @@ processing from the retained source; unrelated orphan job directories are remove
 YouTube lessons (`POST /api/lessons/youtube`) require the learner to confirm they
 may use the video. Only a validated 11-character video ID reaches yt-dlp (argument
 arrays, `--ignore-config`, no playlists, live streams and >3 h videos rejected).
-The pipeline prefers uploader-provided Chinese subtitles, ignores auto-captions
-(they include machine translations), and otherwise downloads audio only for local
-ASR. The browser plays the lesson through the YouTube IFrame player
+The learner chooses `transcript: "subtitles"` (uploader-provided Chinese
+subtitles, fast; auto-captions are ignored) or `"asr"` (download audio only and
+transcribe locally). Uploader subtitles can be wrong — e.g. Vietnamese narration
+written as nonsense Chinese — so a subtitle-based lesson offers "listen again",
+which creates a separate ASR lesson. The browser plays the lesson through the YouTube IFrame player
 (`youtube-nocookie.com`). `POST /api/lessons/{id}/download` saves a ≤720p MP4
 (H.264 preferred) into the lesson media folder; the player then offers the local
 copy.
@@ -73,11 +75,16 @@ object store until measured requirements make the local design insufficient.
 - `lessons`: combines occurrences, definitions, learner-known state, and ranking.
 - `review`: owns saved vocabulary and scheduling; it does not mutate transcripts.
 
-Translation works on sentences, not subtitle lines: consecutive cues are joined
-when a cue lacks closing punctuation, the pause is ≤700 ms and the sentence stays
-≤60 characters (max 3 cues). Each cue carries the sentence's `translation_vi`
+Translation works per subtitle cue, because real cues are already sentences (and
+Chinese subtitles often omit punctuation). Consecutive cues are joined only when a
+cue ends with a comma-like mark (，,、：:—), the pause is ≤700 ms and the text stays
+≤60 characters (max 3 cues). Each cue carries its `translation_vi`
 plus `translation_group`/`translation_group_end` (or `null` when the optional
-model is missing); the lesson records `translation.unit = "zh-sentence"`.
+model is missing); the lesson records `translation.unit` (current: `zh-cue-v3`,
+exposed by `/api/health` as `translation_unit`). On startup the server upgrades
+every saved lesson in the background — re-analysis of vocabulary/readings when
+`analysis.version` is outdated (cue text, timing and translations are kept) and
+re-translation when the unit is outdated — so opening a lesson never waits.
 Only Chinese is ever translated (`translation.chinese_source`): lines without Han
 characters, or containing kana/Hangul, are kept verbatim with
 `translation_skipped = "not-chinese"`; mostly-foreign lines translate only their

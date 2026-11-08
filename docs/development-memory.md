@@ -130,3 +130,37 @@ a defect that escaped a completed check, or a manual task repeated at least twic
   per-window language detection.
 - Verification: `test_only_chinese_is_sent_for_translation`; mixed English/Chinese
   audio keeps English verbatim and untranslated.
+
+## 2026-11-08 — sentence grouping hid translations; outdated lessons kept stale data
+
+- Evidence: the learner saw lines without translation and re-translation waits.
+  Real data (uploader subtitles and Whisper output) has one sentence per cue
+  without punctuation, so "no closing punctuation" grouped 3 sentences and left 2
+  rows blank. Each rule change re-translated lessons lazily on open. A lesson made
+  before context readings still showed 上 shǎng / 說 shuì.
+- Root cause: grouping heuristic built from a hypothetical, not real cues; saved
+  lessons were only upgraded on demand, and analysis upgrades did not exist.
+- Reusable rule: group only on explicit comma-like continuation; version both
+  analysis and translation, and upgrade saved lessons in the background at startup
+  without touching original cue text/timing.
+- Verification: `test_only_comma_continued_cues_are_translated_together`,
+  `test_startup_upgrade_translates_saved_lessons_once`,
+  `test_old_lessons_get_context_readings_without_losing_text_or_translation`.
+
+## 2026-11-08 — uploader YouTube subtitles contained nonsense lines
+
+- Evidence: lesson `_tvupSFn1JE` showed "查得998 后来从特色攻略杀到荣哈迪" and
+  "vitamin Shadowing Gum Mr Chinese"; the lines are in the uploader's own `zh`
+  track, where Vietnamese narration was rendered as junk. Local ASR (multilingual)
+  produced the Vietnamese narration verbatim and clean Chinese.
+- Reusable rule: never treat uploader subtitles as ground truth; let the learner
+  choose local listening up front and re-run it from the lesson.
+- Verification: `test_learner_can_choose_local_listening_instead_of_youtube_subtitles`.
+
+## 2026-11-08 — `pnpm dev --reload` restarted a running job into FileExistsError
+
+- Evidence: job `b5545ebb` failed with `FileExistsError: …/speech.wav`.
+- Root cause: code edits reloaded the server mid-job; the resumed job found the
+  partial audio from the first run.
+- Reusable rule: resumable stages must clear their own partial outputs first.
+- Verification: the ASR-choice test seeds a stale `speech.wav`.

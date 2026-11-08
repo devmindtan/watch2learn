@@ -176,3 +176,74 @@ def test_uploaded_video_is_kept_in_lesson_media_folder(monkeypatch, tmp_path):
 
     asyncio.run(scenario())
     assert (tmp_path / "data" / "media").is_dir()
+
+
+def test_learner_can_choose_local_listening_instead_of_youtube_subtitles(monkeypatch, tmp_path):
+    isolate(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        youtube,
+        "fetch_metadata",
+        lambda video_id: {
+            "video_id": video_id,
+            "title": "Shadowing",
+            "channel": "",
+            "duration": 60,
+            "subtitles": ["zh"],
+        },
+    )
+    monkeypatch.setattr(
+        youtube, "download_subtitle", lambda *args: pytest.fail("subtitles were not requested")
+    )
+
+    def fake_download(video_id, output_stem, audio_only, on_progress=None):
+        assert audio_only is True
+        output_stem.parent.mkdir(parents=True, exist_ok=True)
+        path = output_stem.with_suffix(".webm")
+        path.write_bytes(b"audio")
+        return path
+
+    work_dir_seen = []
+
+    def fake_extract(source, output):
+        work_dir_seen.append(output)
+        assert not output.exists()  # stale partial files from a resumed job are cleared
+        output.write_bytes(b"")
+        return output
+
+    monkeypatch.setattr(youtube, "download", fake_download)
+    monkeypatch.setattr(app_module, "extract_asr_audio", fake_extract)
+    monkeypatch.setattr(
+        app_module,
+        "transcribe_mandarin",
+        lambda path, on_progress=None: (
+            [Cue("cue-1", 0, 900, "Chào các bạn"), Cue("cue-2", 1000, 2000, "我捡到了一部手机。")],
+            {"method": "faster-whisper"},
+        ),
+    )
+    stale = tmp_path / "jobs" / "stale"
+    stale.mkdir(parents=True)
+    (stale / "speech.wav").write_bytes(b"partial")
+    lesson = app_module.process_youtube("jNQXAC9IVRw", stale, use_subtitles=False)
+    assert lesson["transcript"]["method"] == "faster-whisper"
+    assert lesson["cues"][0]["translation_vi"] in ("", None)
+
+    async def scenario():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            body = {"url": "jNQXAC9IVRw", "confirm_rights": True, "transcript": "asr"}
+            job = (await client.post("/api/lessons/youtube", json=body)).json()
+            for _ in range(100):
+                job = (await client.get(f"/api/jobs/{job['id']}")).json()
+                if job["status"] not in {"queued", "processing"}:
+                    break
+                await asyncio.sleep(0.02)
+            assert job["status"] == "complete", job
+            subtitles_job = await client.post(
+                "/api/lessons/youtube", json=body | {"transcript": "subtitles"}
+            )
+            assert subtitles_job.json()["id"] != job["id"]  # separate lesson per source choice
+
+    monkeypatch.setattr(
+        youtube, "download_subtitle", lambda *args: (_ for _ in ()).throw(RuntimeError("none"))
+    )
+    asyncio.run(scenario())
