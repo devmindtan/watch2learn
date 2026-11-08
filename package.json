@@ -1,0 +1,16 @@
+{
+  "name": "watch2learn",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local-first vocabulary learning from permitted video content",
+  "packageManager": "pnpm@10.16.1",
+  "scripts": {
+    "doctor": "bash scripts/doctor.sh",
+    "policy:free": "bash scripts/check-free-policy.sh",
+    "quality": "pnpm policy:free && bash scripts/doctor.sh --ci"
+  },
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=10"
+  }
+}

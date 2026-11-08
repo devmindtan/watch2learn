@@ -1,0 +1,17 @@
+name: repository-policy
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check free-only policy
+        run: bash scripts/check-free-policy.sh
