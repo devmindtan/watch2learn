@@ -6,7 +6,7 @@ Videos, models, the database and all processing stay on that machine.
 
 ```text
 phone / laptop browser
-  └─ https://<user>.github.io/watch2learn/        static UI (apps/web)
+  └─ https://<project>.vercel.app                   static UI (apps/web)
         └─ https://<machine>.<tailnet>.ts.net     Tailscale Funnel → 127.0.0.1:8000
               └─ pnpm dev (FastAPI, SQLite, data/media, ASR, translation, Ollama)
 ```
@@ -27,7 +27,7 @@ elements cannot send headers. Signed URLs only allow reading.
 ## 2. Allow the public UI origin and start the backend
 
 ```bash
-WATCH2LEARN_ALLOWED_ORIGINS=https://<user>.github.io pnpm dev
+WATCH2LEARN_ALLOWED_ORIGINS=https://<project>.vercel.app pnpm dev
 ```
 
 `localhost`/`127.0.0.1` origins are always allowed. Chrome Private Network Access
@@ -50,10 +50,9 @@ token, so keep it secret.
 
 ## 4. Publish the UI
 
-`.github/workflows/pages.yml` uploads `apps/web` to GitHub Pages when it changes
-on `main`. Enable it once in the repository: Settings → Pages → Source: GitHub
-Actions. GitHub Pages is free for public repositories. Any static host works: the
-UI is plain HTML/CSS/JS with relative asset paths.
+The UI is plain HTML/CSS/JS with relative asset paths (`apps/web`), so any static
+host works. The planned host is Vercel; its build/packaging workflow will be added
+once the feature set is stable.
 
 ## 5. Connect
 
@@ -66,5 +65,5 @@ browser only.
 - The YouTube player loads from YouTube in the browser; every other request goes
   to your backend.
 - Microphone recording (pronunciation check) needs HTTPS or localhost, which both
-  GitHub Pages and Funnel provide.
+  Vercel and Funnel provide.
 - Upload limits: 4 GB per video. There is no rate limiting; do not share the token.
