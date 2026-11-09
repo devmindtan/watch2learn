@@ -185,24 +185,19 @@
               </p>
               <div class="now-controls" role="group" aria-label="Điều khiển câu">
                 <button id="prev-cue" class="icon-button" type="button" title="Câu trước (←)" aria-label="Câu trước">‹</button>
-                <button id="replay-cue" class="control-button" type="button" title="Nghe lại câu trong video (R)">
-                  <span aria-hidden="true">↻</span> Nghe lại
+                <button id="replay-cue" class="btn btn-listen" type="button" title="Nghe lại câu trong video (R)">
+                  <span class="btn-icon" aria-hidden="true">↻</span> <span class="btn-label">Nghe lại</span>
                 </button>
-                <button id="loop-cue" class="control-button" type="button" aria-pressed="false" title="Lặp lại câu này (L)">
-                  <span aria-hidden="true">⟲</span> Lặp câu
+                <button id="loop-cue" class="btn btn-plain" type="button" aria-pressed="false" title="Lặp lại câu này (L)">
+                  <span class="btn-icon" aria-hidden="true">⟲</span> <span class="btn-label">Lặp câu</span>
                 </button>
-                <button id="speak-cue" class="control-button" type="button" title="Đọc chậm bằng giọng máy">
-                  <span aria-hidden="true">🔈</span> Đọc chậm
+                <button id="speak-cue" class="btn btn-listen" type="button" title="Đọc chậm bằng giọng máy">
+                  <span class="btn-icon" aria-hidden="true">🔈</span> <span class="btn-label">Đọc chậm</span>
                 </button>
                 <button id="next-cue" class="icon-button" type="button" title="Câu sau (→)" aria-label="Câu sau">›</button>
               </div>
             </div>
-            <div class="sentence-study" role="group" aria-label="Học câu này">
-              <button id="save-cue" class="control-button" type="button" aria-pressed="false">☆ Lưu câu</button>
-              <button id="practice-cue" class="control-button" type="button" title="Ghi âm và chấm phát âm câu này">🎙 Đọc thử câu</button>
-              <button id="learned-cue" class="control-button" type="button" aria-pressed="false">✓ Đã thuộc câu</button>
-              <button id="explain-cue" class="control-button explain-button" type="button" title="Nghĩa, từng từ, cấu trúc câu và khi nào dùng">💬 Giải thích câu</button>
-            </div>
+            <div id="sentence-actions" class="sentence-study" aria-label="Học câu này"></div>
             <p id="now-text" class="now-text" lang="zh"></p>
             <p id="now-translation" class="now-translation translation"></p>
             <section id="sentence-explain" class="explain-box" hidden aria-live="polite"></section>
@@ -267,6 +262,22 @@
           <button class="primary-button" value="save">Lưu giọng đọc</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog id="study-dialog" class="study-drawer" aria-labelledby="study-title">
+      <div class="study-drawer-head">
+        <div>
+          <p class="card-kicker">Học từ thư viện</p>
+          <h2 id="study-title">Bài học</h2>
+        </div>
+        <button id="study-close" class="close-button" type="button" aria-label="Đóng">×</button>
+      </div>
+      <div class="study-drawer-body">
+        <video id="study-video" class="study-video" controls preload="metadata" playsinline hidden></video>
+        <p id="study-video-note" class="sense-note" hidden></p>
+        <section id="study-sentence" class="card study-sentence"></section>
+        <section id="study-word" class="word-card study-word" hidden></section>
+      </div>
     </dialog>
 
     <dialog id="practice-dialog" class="practice-dialog" aria-label="Luyện phát âm">

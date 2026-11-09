@@ -208,3 +208,18 @@ a defect that escaped a completed check, or a manual task repeated at least twic
   resolver pick compatible transitive versions there.
 - Verification: after a script exits, `ss -ltnH` on the GPU machine shows no 8911/
   11434 listener and VRAM returns to ~220 MiB; `pnpm gpu:install` completes.
+
+## 2026-11-09 — study features differed between the video screen and the library
+
+- Evidence: the learner reported buttons that looked alike and saved words in the
+  library missing features available on the video screen (lessons, original clip,
+  own meaning, occurrences); the library also had wide side margins.
+- Root cause: the word card lived inside `app.js` and depended on the video screen's
+  global state, so the library rebuilt a reduced copy.
+- Reusable rule: study UI is rendered by `study.js` from a study context; every
+  surface (video screen, library drawer) uses the same cards. Buttons use
+  `actionButton(kind, …)` with one look per purpose (listen, practice, lesson,
+  save, learned, video, danger) and are grouped as Nghe / Học / Lưu.
+- Verification: Playwright opens a saved word from the library and gets the same
+  action set as on the video screen; no console errors; no horizontal scroll at
+  390 px.

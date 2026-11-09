@@ -4,27 +4,22 @@ import {
   onLearnerChange,
   ownMeaning,
   sentenceStatus,
-  updateSentence,
-  updateWord,
   wordStatus,
 } from "./learner.js";
 import { initLibrary, refreshLibrary } from "./library.js";
-import { openPractice } from "./practice.js";
+import { firstMeaning, renderWordCard, sentenceActions, setWordStatus } from "./study.js";
 import {
   configureSpeech,
   createNarration,
   onVoices,
   speak,
   stopSpeaking,
-  toneDescription,
 } from "./speech.js";
 import {
   $,
   button,
-  cleanSenses,
   delay,
   element,
-  escapeRegExp,
   plain,
   readStore,
   sizeLabel,
@@ -69,9 +64,7 @@ const nextButton = $("#next-cue");
 const replayButton = $("#replay-cue");
 const loopButton = $("#loop-cue");
 const speakCueButton = $("#speak-cue");
-const saveCueButton = $("#save-cue");
-const practiceCueButton = $("#practice-cue");
-const learnedCueButton = $("#learned-cue");
+const sentenceActionsBox = $("#sentence-actions");
 
 const wordDetail = $("#word-detail");
 const tabs = [$("#tab-transcript"), $("#tab-vocabulary")];
@@ -754,28 +747,6 @@ function renderTranscript() {
   );
 }
 
-function firstMeaning(word) {
-  return ownMeaning(word.id) || cleanSenses(word.definitions_vi).senses[0] || "";
-}
-
-/** The dictionary sense whose wording appears in this sentence's Vietnamese translation. */
-function contextSense(word, cue) {
-  const translation = (cue?.translation_vi || "").normalize("NFC").toLowerCase();
-  if (!translation) return null;
-  let best = null;
-  cleanSenses(word.definitions_vi).senses.forEach((sense, index) => {
-    for (const raw of sense.replace(/\([^)]*\)|\[[^\]]*]/g, "").split(/[;,/]/)) {
-      const phrase = raw.trim().normalize("NFC").toLowerCase();
-      if (phrase.length < 2) continue;
-      const pattern = new RegExp(`(^|[^\\p{L}])${escapeRegExp(phrase)}(?=$|[^\\p{L}])`, "u");
-      if (pattern.test(translation) && (!best || phrase.length > best.phrase.length)) {
-        best = { phrase, text: raw.trim(), index };
-      }
-    }
-  });
-  return best;
-}
-
 function matchesFilter(word, query) {
   const known = wordStatus(word.id) === "learned";
   if (state.filter === "known" && !known) return false;
@@ -832,23 +803,34 @@ function refreshWordMarks(wordId) {
   });
 }
 
-/** Save/learn a word with the occurrence currently shown, so the library keeps its context. */
-async function setWordStatus(id, status) {
-  const word = wordsById.get(id);
-  const occurrence = word?.occurrences[id === state.selectedWord ? state.selectedOccurrence : 0];
-  try {
-    await updateWord(id, { status, lesson_id: state.lesson.id, cue_id: occurrence?.cue_id });
-  } catch (error) {
-    window.alert(error.message);
-    return;
-  }
-  refreshWordMarks(id);
-  renderVocabulary();
-  if (state.selectedWord === id) showWord(id, state.selectedOccurrence, { keepScroll: true });
+/** What the shared study cards need from the video screen. */
+function lessonContext() {
+  return {
+    lesson: state.lesson,
+    wordsById,
+    cueIndexById,
+    playClip: (index) => {
+      if (!hasPlayer()) return false;
+      playClip(index);
+      return true;
+    },
+    pause,
+    onChange: (wordId) => {
+      if (wordId) refreshWordMarks(wordId);
+      renderVocabulary();
+      updateSentenceMarks();
+      renderSentenceActions();
+      if (state.selectedWord) showWord(state.selectedWord, state.selectedOccurrence, { keepScroll: true });
+    },
+    showWord: (wordId, index) => showWord(wordId, index, { keepScroll: true }),
+    onClose: closeWord,
+  };
 }
 
 function toggleKnown(id) {
-  setWordStatus(id, wordStatus(id) === "learned" ? "saved" : "learned");
+  const word = wordsById.get(id);
+  const occurrence = word?.occurrences[id === state.selectedWord ? state.selectedOccurrence : 0];
+  setWordStatus(lessonContext(), id, wordStatus(id) === "learned" ? "saved" : "learned", occurrence?.cue_id);
 }
 
 function highlightSelection() {
@@ -858,466 +840,16 @@ function highlightSelection() {
   }
 }
 
-function section(title, ...children) {
-  const node = element("section", "word-section");
-  node.append(element("h3", null, title), ...children);
-  return node;
-}
-
 function showWord(id, occurrenceIndex = 0, { keepScroll = false } = {}) {
   const word = wordsById.get(id);
   if (!word) return;
   const scroll = wordDetail.scrollTop;
   state.selectedWord = id;
-  state.selectedOccurrence = Math.min(occurrenceIndex, word.occurrences.length - 1);
-  const occurrence = word.occurrences[state.selectedOccurrence];
-  const cueIndex = cueIndexById.get(occurrence.cue_id);
-  const cue = state.lesson.cues[cueIndex];
-  const status = wordStatus(id);
-  const own = ownMeaning(id);
-
-  const head = element("div", "word-head");
-  const identity = element("div");
-  const hanzi = element("p", "word-hanzi", word.word);
-  hanzi.lang = "zh-Hans";
-  if (word.traditional && word.traditional !== word.word) {
-    const traditional = element("span", "traditional", word.traditional);
-    traditional.lang = "zh-Hant";
-    traditional.title = "Phồn thể";
-    hanzi.append(traditional);
-  }
-  identity.append(hanzi, element("p", "word-pinyin", occurrence.pinyin || word.pinyin));
-  const actions = element("div", "word-actions");
-  const speakButton = button("control-button", "🔈 Phát âm", () => speak(occurrence.surface || word.word, 0.7));
-  const saveButton = button("control-button known-button", status ? "★ Đã lưu" : "☆ Lưu từ", () =>
-    status ? setWordStatus(id, status) : setWordStatus(id, "saved"),
-  );
-  saveButton.setAttribute("aria-pressed", String(Boolean(status)));
-  saveButton.disabled = Boolean(status);
-  const knownButton = button(
-    "control-button known-button",
-    status === "learned" ? "✓ Đã thuộc" : "Đánh dấu đã thuộc",
-    () => toggleKnown(id),
-  );
-  knownButton.setAttribute("aria-pressed", String(status === "learned"));
-  const close = button("close-button", "×", closeWord);
-  close.setAttribute("aria-label", "Đóng chi tiết từ");
-  actions.append(speakButton, saveButton, knownButton, close);
-  head.append(identity, actions);
-
-  const studyActions = element("div", "study-actions");
-  studyActions.append(
-    button("control-button", "🎙 Luyện phát âm", () =>
-      openPractice({
-        target: occurrence.surface || word.word,
-        pinyin: occurrence.pinyin || word.pinyin,
-        translation: own || cleanSenses(word.definitions_vi).senses[0] || "",
-        kind: "word",
-        itemId: status ? id : null,
-      }),
-    ),
-    button("control-button explain-button", "📖 Xem bài giảng", () =>
-      explainWord(word, occurrence, cue, inContext, { speakIt: false }),
-    ),
-    button("control-button explain-button", "🗣 Nghe giảng", () =>
-      explainWord(word, occurrence, cue, inContext, { speakIt: true }),
-    ),
-  );
-
-  const meaning = element("div");
-  const inContext = contextSense(word, cue);
-  if (own) meaning.append(element("p", "own-meaning", `Nghĩa của bạn: ${own}`));
-  if (inContext) {
-    const highlight = element("p", "context-sense");
-    highlight.append("Trong câu này: ", element("strong", null, inContext.text));
-    highlight.title = "Nghĩa khớp với bản dịch của câu";
-    meaning.append(highlight);
-  }
-  const vietnamese = cleanSenses(word.definitions_vi);
-  if (vietnamese.senses.length) {
-    const list = element("ol", "senses");
-    vietnamese.senses.forEach((sense, index) => {
-      list.append(element("li", inContext?.index === index ? "is-context" : "", sense));
-    });
-    meaning.append(list);
-  } else if (!own) {
-    meaning.append(
-      element("p", "sense-note", "Từ điển offline chưa có nghĩa tiếng Việt cho từ này — bạn có thể tự ghi nghĩa bên dưới."),
-    );
-  }
-  vietnamese.notes.forEach((note) => meaning.append(element("p", "sense-note", note)));
-  const alternatives = (word.alternatives || []).filter((item) => item.definitions_vi?.length);
-  if (alternatives.length) {
-    const details = element("details", "more");
-    details.append(element("summary", null, `Cách đọc / nghĩa khác (${alternatives.length})`));
-    const list = element("ul", "alternatives");
-    for (const alternative of alternatives) {
-      const item = element("li");
-      item.append(element("strong", "alt-pinyin", alternative.pinyin), ` ${alternative.definitions_vi.join("; ")}`);
-      list.append(item);
-    }
-    details.append(list);
-    meaning.append(details);
-  }
-
-  const context = element("div", "context");
-  if (occurrence.before_text) {
-    const before = element("p", "context-neighbor", occurrence.before_text);
-    before.lang = "zh";
-    context.append(before);
-  }
-  const current = element("p", "context-current");
-  current.lang = "zh";
-  const text = occurrence.cue_text;
-  const { start_offset: start, end_offset: end } = occurrence;
-  if (Number.isInteger(start) && Number.isInteger(end) && end <= text.length) {
-    current.append(text.slice(0, start), element("mark", null, text.slice(start, end)), text.slice(end));
-  } else {
-    current.textContent = text;
-  }
-  context.append(current);
-  if (cue) {
-    const translation = element("p", "context-translation translation");
-    translation.dataset.translationFor = cue.id;
-    updateTranslationNode(translation, cue);
-    context.append(translation);
-  }
-  if (occurrence.after_text) {
-    const after = element("p", "context-neighbor", occurrence.after_text);
-    after.lang = "zh";
-    context.append(after);
-  }
-  const contextActions = element("div", "context-actions");
-  contextActions.append(
-    button("control-button", "▶ Nghe câu này", () => playClip(cueIndex)),
-    button("control-button", "🔈 Đọc chậm", () => speak(occurrence.cue_text)),
-  );
-  if (word.occurrences.length > 8) {
-    const position = state.selectedOccurrence;
-    const previous = button("icon-button", "‹", () => showWord(id, position - 1, { keepScroll: true }));
-    previous.disabled = position === 0;
-    previous.setAttribute("aria-label", "Lần xuất hiện trước");
-    const next = button("icon-button", "›", () => showWord(id, position + 1, { keepScroll: true }));
-    next.disabled = position === word.occurrences.length - 1;
-    next.setAttribute("aria-label", "Lần xuất hiện sau");
-    const label = element("span", "occurrence-step", `Lần ${position + 1}/${word.occurrences.length} · ${timeLabel(occurrence.start_ms)}`);
-    contextActions.append(previous, label, next);
-  } else if (word.occurrences.length > 1) {
-    word.occurrences.forEach((item, position) => {
-      const chip = button("occurrence-chip", `${position + 1} · ${timeLabel(item.start_ms)}`, () =>
-        showWord(id, position, { keepScroll: true }),
-      );
-      chip.setAttribute("aria-pressed", String(position === state.selectedOccurrence));
-      chip.setAttribute("aria-label", `Lần xuất hiện ${position + 1} tại ${timeLabel(item.start_ms)}`);
-      contextActions.append(chip);
-    });
-  }
-
-  const edit = element("details", "edit-meaning word-section");
-  const textarea = element("textarea");
-  textarea.value = own;
-  textarea.placeholder = "Ví dụ: học (trong câu này nghĩa là “học tập”)";
-  textarea.setAttribute("aria-label", "Nghĩa của bạn");
-  const save = button("control-button", "Lưu nghĩa", async () => {
-    try {
-      await updateWord(id, {
-        status: status || "saved",
-        own_meaning: textarea.value.trim(),
-        lesson_id: state.lesson.id,
-        cue_id: occurrence.cue_id,
-      });
-    } catch (error) {
-      window.alert(error.message);
-      return;
-    }
-    refreshWordMarks(id);
-    renderVocabulary();
-    showWord(id, state.selectedOccurrence, { keepScroll: true });
-  });
-  edit.append(element("summary", null, "Sửa / ghi chú nghĩa của bạn"), textarea, save);
-
-  const explainBox = element("section", "explain-box");
-  explainBox.hidden = true;
-  wordDetail.replaceChildren(
-    head,
-    studyActions,
-    explainBox,
-    section("Nghĩa", meaning),
-    section(`Trong video · ${word.occurrence_count} lần`, context, contextActions),
-    edit,
-  );
+  state.selectedOccurrence = Math.max(0, Math.min(occurrenceIndex, word.occurrences.length - 1));
+  renderWordCard(wordDetail, lessonContext(), id, state.selectedOccurrence);
   wordDetail.hidden = false;
   wordDetail.scrollTop = keepScroll ? scroll : 0;
   highlightSelection();
-}
-
-/** Read an NDJSON stream from the backend, calling onEvent for each line. */
-async function streamEvents(path, body, onEvent) {
-  const response = await apiFetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) await responseJson(response);
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-    let newline;
-    while ((newline = buffer.indexOf("\n")) >= 0) {
-      const line = buffer.slice(0, newline).trim();
-      buffer = buffer.slice(newline + 1);
-      if (line && onEvent(JSON.parse(line)) === false) {
-        reader.cancel();
-        return;
-      }
-    }
-    if (done) return;
-  }
-}
-
-/**
- * A spoken Vietnamese lesson. `plan` lists the sections in teaching order; each
- * has a title and either fixed content built from verified data, or `ai: key`
- * filled by the local model as it writes. With `speakIt` the narration starts at
- * once and follows the sections in order as they become available.
- */
-function lessonPanel(box, { title, request, plan, speakIt }) {
-  const run = Symbol("lesson");
-  box.run = run;
-  const status = element("p", "explain-status");
-  const body = element("div", "lesson-sections");
-  let narration = null;
-  let spokenUpTo = 0;
-  const sections = plan.map((item) => {
-    const node = element("section", "lesson-section");
-    const content = element("div", "lesson-content");
-    node.append(element("h4", null, item.title), content);
-    if (item.ai) content.append(element("p", "sense-note", "AI trên máy bạn đang soạn phần này…"));
-    body.append(node);
-    return { ...item, node, content, ready: false, speech: [] };
-  });
-
-  const fill = (section, lines, speech) => {
-    section.content.replaceChildren(...lines.map((line) => (line instanceof Node ? line : element("p", null, line))));
-    section.speech = speech;
-    section.ready = true;
-    narrate();
-  };
-  const narrate = () => {
-    if (!narration || box.run !== run) return;
-    while (spokenUpTo < sections.length && sections[spokenUpTo].ready) {
-      const section = sections[spokenUpTo];
-      if (section.speech.length) narration.add([{ text: `${section.spokenTitle || section.title}.`, lang: "vi" }, ...section.speech]);
-      spokenUpTo += 1;
-    }
-    if (spokenUpTo === sections.length) narration.finish();
-  };
-  const startSpeaking = () => {
-    narration = createNarration({
-      onError: (error) => {
-        if (box.run === run) status.textContent = `Không phát được âm thanh: ${error.message || error}`;
-      },
-    });
-    if (!narration.available) {
-      status.textContent = "Chưa có giọng đọc: chạy “pnpm setup:voices” trên máy chủ.";
-      return;
-    }
-    status.textContent = "";
-    spokenUpTo = 0;
-    narrate();
-  };
-  const controls = element("div", "explain-controls");
-  controls.append(
-    button("control-button", "🔊 Nghe giảng", () => {
-      pause();
-      startSpeaking();
-    }),
-    button("control-button", "⏹ Dừng", () => stopSpeaking()),
-  );
-  box.replaceChildren(element("h3", null, title), controls, status, body);
-  box.hidden = false;
-  if (speakIt) {
-    pause();
-    startSpeaking();
-  }
-
-  const examples = [];
-  streamEvents("/api/explain", request, (event) => {
-    if (box.run !== run) return false;
-    if (event.type === "facts") {
-      plan.forEach((item, index) => item.build && fill(sections[index], ...item.build(event.facts)));
-    } else if (event.type === "section") {
-      const section = sections.find((item) => item.ai === event.key);
-      if (section) fill(section, [event.text], [{ text: event.text }]);
-    } else if (event.type === "example") {
-      examples.push(event);
-      const section = sections.find((item) => item.examples);
-      if (section?.ready) {
-        const line = element("p", "lesson-example");
-        const chinese = element("span", "lesson-example-zh", event.zh);
-        chinese.lang = "zh";
-        line.append(chinese, element("span", "lesson-example-pinyin", ` ${event.pinyin} `), `— ${event.vi}`);
-        section.content.append(line);
-        if (narration && spokenUpTo > sections.indexOf(section)) {
-          narration.add([{ text: "Ví dụ:", lang: "vi" }, { text: event.zh, lang: "zh", rate: 0.8 }, { text: `nghĩa là ${event.vi}.`, lang: "vi" }]);
-        } else {
-          section.speech.push({ text: "Ví dụ:", lang: "vi" }, { text: event.zh, lang: "zh", rate: 0.8 }, { text: `nghĩa là ${event.vi}.`, lang: "vi" });
-        }
-      }
-    } else if (event.type === "error") {
-      sections
-        .filter((item) => item.ai && !item.ready)
-        .forEach((item) => fill(item, [element("p", "sense-note", event.message)], []));
-    } else if (event.type === "done") {
-      sections.filter((item) => !item.ready).forEach((item) => fill(item, [element("p", "sense-note", "AI chưa viết được phần này.")], []));
-      if (!event.cached || sections.some((item) => item.ai)) {
-        body.append(
-          element("p", "ai-label", `Các phần “${plan.filter((item) => item.ai).map((item) => item.title).join("”, “")}” do AI chạy trên máy bạn soạn — có thể chưa chính xác.`),
-        );
-      }
-    }
-    return true;
-  }).catch((error) => {
-    if (box.run === run) status.textContent = error.message;
-  });
-}
-
-function sentenceLine(text) {
-  const node = element("p", "lesson-zh", text);
-  node.lang = "zh";
-  return node;
-}
-
-/** Word lesson: how to read it, meaning, pronunciation notes, where it is met, real use. */
-function explainWord(word, occurrence, cue, inContext, { speakIt }) {
-  const box = wordDetail.querySelector(".explain-box");
-  if (!box) return;
-  const surface = occurrence.surface || word.word;
-  const senses = cleanSenses(word.definitions_vi).senses;
-  const meaning = ownMeaning(word.id) || senses.slice(0, 3).join("; ");
-  lessonPanel(box, {
-    title: `Bài giảng: ${surface}`,
-    request: { lesson_id: state.lesson.id, word_id: word.id, cue_id: occurrence.cue_id },
-    speakIt,
-    plan: [
-      {
-        title: "Từ này đọc thế nào",
-        spokenTitle: "Từ này đọc thế nào",
-        build: (facts) => {
-          const pinyin = facts.syllables.map((item) => item.pinyin).join(" ");
-          const lines = [`${surface} đọc là ${pinyin}.`];
-          const speech = [
-            { text: "Từ này đọc là", lang: "vi" },
-            { text: surface, lang: "zh", rate: 0.8 },
-            { text: "Đọc chậm lại:", lang: "vi" },
-            { text: surface, lang: "zh", rate: 0.55 },
-          ];
-          if (facts.syllables.length > 1) {
-            facts.syllables.forEach((item) => {
-              lines.push(`${item.character} (${item.pinyin}): ${toneDescription(item.pinyin)}.`);
-              speech.push(
-                { text: "Chữ", lang: "vi" },
-                { text: item.character, lang: "zh", rate: 0.6 },
-                { text: `${toneDescription(item.pinyin)}.`, lang: "vi" },
-              );
-            });
-          } else if (facts.syllables[0]) {
-            lines.push(`${toneDescription(facts.syllables[0].pinyin)}.`);
-            speech.push({ text: `Từ này mang ${toneDescription(facts.syllables[0].pinyin)}.`, lang: "vi" });
-          }
-          return [lines, speech];
-        },
-      },
-      {
-        title: "Nghĩa là gì",
-        build: () => {
-          const lines = [];
-          const speech = [];
-          if (meaning) {
-            lines.push(`Nghĩa: ${meaning}.`);
-            speech.push({ text: `Từ này có nghĩa là ${meaning}.`, lang: "vi" });
-          }
-          if (inContext) {
-            lines.push(`Trong câu này: ${inContext.text}.`);
-            speech.push({ text: `Trong câu trong video, nó mang nghĩa ${inContext.text}.`, lang: "vi" });
-          }
-          lines.push(sentenceLine(occurrence.cue_text));
-          if (cue?.translation_vi) lines.push(`→ ${cue.translation_vi}`);
-          speech.push(
-            { text: "Câu trong video là:", lang: "vi" },
-            { text: occurrence.cue_text, lang: "zh", rate: 0.85 },
-          );
-          if (cue?.translation_vi) speech.push({ text: `nghĩa là: ${cue.translation_vi}`, lang: "vi" });
-          return [lines, speech];
-        },
-      },
-      {
-        title: "Lưu ý khi phát âm",
-        build: (facts) =>
-          facts.tips.length
-            ? [facts.tips, [{ text: facts.tips.join(" ") }]]
-            : [["Từ này không có âm đặc biệt khó với người Việt."], [{ text: "Từ này không có âm đặc biệt khó với người Việt.", lang: "vi" }]],
-      },
-      { title: "Thường gặp ở đâu trong giao tiếp", ai: "giao_tiep" },
-      { title: "Sử dụng thực tế như thế nào", ai: "su_dung", examples: true },
-    ],
-  });
-}
-
-/** Sentence lesson: how to read it, meaning word by word, pronunciation, structure, when used. */
-function explainSentence({ speakIt }) {
-  const cue = state.lesson?.cues[state.activeCue];
-  if (!cue) return;
-  const glossary = cue.segments
-    .filter((segment) => segment.vocabulary_id && wordsById.has(segment.vocabulary_id))
-    .map((segment) => ({ text: segment.text, pinyin: segment.pinyin, meaning: firstMeaning(wordsById.get(segment.vocabulary_id)) }))
-    .filter((item) => item.meaning);
-  lessonPanel($("#sentence-explain"), {
-    title: "Bài giảng câu",
-    request: { lesson_id: state.lesson.id, cue_id: cue.id },
-    speakIt,
-    plan: [
-      {
-        title: "Câu này đọc thế nào",
-        build: (facts) => [
-          [sentenceLine(cue.text), facts.syllables.map((item) => item.pinyin).join(" ")],
-          [
-            { text: "Câu này đọc là", lang: "vi" },
-            { text: cue.text, lang: "zh", rate: 0.85 },
-            { text: "Đọc chậm lại:", lang: "vi" },
-            { text: cue.text, lang: "zh", rate: 0.6 },
-          ],
-        ],
-      },
-      {
-        title: "Nghĩa là gì",
-        build: () => {
-          const lines = cue.translation_vi ? [`Nghĩa: ${cue.translation_vi}`] : [];
-          const speech = cue.translation_vi ? [{ text: `Câu này nghĩa là: ${cue.translation_vi}`, lang: "vi" }] : [];
-          if (glossary.length) {
-            speech.push({ text: "Từng từ trong câu:", lang: "vi" });
-            glossary.forEach((item) => {
-              lines.push(`${item.text} (${item.pinyin || ""}): ${item.meaning}`);
-              speech.push({ text: item.text, lang: "zh", rate: 0.75 }, { text: `là ${item.meaning}.`, lang: "vi" });
-            });
-          }
-          return [lines, speech];
-        },
-      },
-      {
-        title: "Lưu ý khi phát âm",
-        build: (facts) =>
-          facts.tips.length
-            ? [facts.tips, [{ text: facts.tips.join(" ") }]]
-            : [["Câu này không có âm đặc biệt khó."], [{ text: "Câu này không có âm đặc biệt khó.", lang: "vi" }]],
-      },
-      { title: "Cấu trúc câu", ai: "cau_truc" },
-      { title: "Thường nói khi nào, ở đâu", ai: "giao_tiep", examples: true },
-    ],
-  });
 }
 
 function closeSentenceExplanation() {
@@ -1347,9 +879,10 @@ function setActiveCue(index, { scroll = true } = {}) {
   nowTime.textContent = timeLabel(cue.start_ms);
   prevButton.disabled = index === 0;
   nextButton.disabled = index === cues.length - 1;
-  updateSentenceButtons();
   if (!changed && nowText.childElementCount) return;
   closeSentenceExplanation();
+  renderSentenceActions();
+  updateSentenceMarks();
   renderCueText(nowText, cue);
   nowTranslation.dataset.translationFor = cue.id;
   updateTranslationNode(nowTranslation, cue);
@@ -1365,55 +898,22 @@ function setActiveCue(index, { scroll = true } = {}) {
   }
 }
 
-function updateSentenceButtons() {
-  const cue = state.lesson?.cues[state.activeCue];
-  if (!cue) return;
-  const status = sentenceStatus(state.lesson.id, cue.id);
-  saveCueButton.textContent = status ? "★ Đã lưu câu" : "☆ Lưu câu";
-  saveCueButton.setAttribute("aria-pressed", String(Boolean(status)));
-  learnedCueButton.setAttribute("aria-pressed", String(status === "learned"));
-  learnedCueButton.textContent = status === "learned" ? "✓ Đã thuộc câu" : "Đánh dấu thuộc câu";
+function updateSentenceMarks() {
+  if (!state.lesson) return;
   transcript.querySelectorAll(".cue-row").forEach((row) => {
     const rowCue = state.lesson.cues[Number(row.dataset.index)];
     row.classList.toggle("is-saved-sentence", Boolean(sentenceStatus(state.lesson.id, rowCue.id)));
   });
 }
 
-async function setSentenceStatus(status) {
-  const cue = state.lesson.cues[state.activeCue];
-  try {
-    await updateSentence(state.lesson.id, cue.id, status);
-  } catch (error) {
-    window.alert(error.message);
-  }
+function renderSentenceActions() {
+  if (!state.lesson || state.activeCue < 0) return;
+  sentenceActionsBox.replaceChildren(sentenceActions(lessonContext(), state.activeCue, $("#sentence-explain")));
 }
 
-$("#explain-cue").addEventListener("click", () => explainSentence({ speakIt: true }));
-
-saveCueButton.addEventListener("click", () => {
-  const cue = state.lesson.cues[state.activeCue];
-  if (!sentenceStatus(state.lesson.id, cue.id)) setSentenceStatus("saved");
-});
-learnedCueButton.addEventListener("click", () => {
-  const cue = state.lesson.cues[state.activeCue];
-  setSentenceStatus(sentenceStatus(state.lesson.id, cue.id) === "learned" ? "saved" : "learned");
-});
-practiceCueButton.addEventListener("click", () => {
-  const index = state.activeCue;
-  const cue = state.lesson.cues[index];
-  const saved = sentenceStatus(state.lesson.id, cue.id);
-  openPractice({
-    target: cue.text,
-    pinyin: cue.segments.map((segment) => segment.pinyin).filter(Boolean).join(" "),
-    translation: cue.translation_vi,
-    kind: "sentence",
-    itemId: saved ? `${state.lesson.id}:${cue.id}` : null,
-    playModel: hasPlayer() ? () => playClip(index) : null,
-  });
-});
 onLearnerChange(() => {
-  if (!state.lesson) return;
-  updateSentenceButtons();
+  updateSentenceMarks();
+  renderSentenceActions();
 });
 
 function seekTo(index) {

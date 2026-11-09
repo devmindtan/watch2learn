@@ -2,8 +2,9 @@
 import { apiFetch, apiJson, apiUrl, responseJson } from "./api.js";
 import { removeSentence, removeWord, updateSentence, updateWord } from "./learner.js";
 import { openPractice } from "./practice.js";
-import { speak } from "./speech.js";
-import { $, button, element, plain, timeLabel } from "./ui.js";
+import { speak, stopSpeaking } from "./speech.js";
+import { renderSentenceCard, renderWordCard } from "./study.js";
+import { $, actionButton, button, element, plain, timeLabel } from "./ui.js";
 
 const tabs = [...document.querySelectorAll("[data-library-tab]")];
 const videoGrid = $("#video-grid");
@@ -117,7 +118,7 @@ function videoCard(item) {
     bar,
     badges,
   );
-  const remove = button("delete-button", "Xoá", async () => {
+  const remove = actionButton("danger", "🗑", null, async () => {
     if (!window.confirm(`Xoá bài học “${item.filename}” và video đã lưu của nó?`)) return;
     try {
       await responseJson(await apiFetch(`/api/lessons/${item.id}`, { method: "DELETE" }));
@@ -126,7 +127,8 @@ function videoCard(item) {
     }
     loadVideos();
   });
-  remove.setAttribute("aria-label", `Xoá bài học ${item.filename}`);
+  remove.title = `Xoá bài học ${item.filename}`;
+  remove.setAttribute("aria-label", remove.title);
   card.append(open, remove);
   return card;
 }
@@ -168,8 +170,36 @@ function scoreBadge(row) {
   return element("span", "badge badge-score", `Phát âm tốt nhất ${row.best_score}%`);
 }
 
-function wordRow(row) {
+function stop(event) {
+  event.stopPropagation();
+}
+
+/** Quick actions on a row; the row itself opens the full study card. */
+function quickActions(...buttons) {
+  const actions = element("div", "library-actions");
+  buttons.filter(Boolean).forEach((item) => {
+    item.addEventListener("click", stop);
+    actions.append(item);
+  });
+  return actions;
+}
+
+function openableRow(onOpen) {
   const item = element("li", "library-item");
+  item.tabIndex = 0;
+  item.addEventListener("click", onOpen);
+  item.addEventListener("keydown", (event) => {
+    if (event.target === item && (event.key === "Enter" || event.key === " ")) {
+      event.preventDefault();
+      onOpen();
+    }
+  });
+  return item;
+}
+
+function wordRow(row) {
+  const open = () => openStudy({ lessonId: row.lesson_id, cueId: row.cue_id, wordId: row.word_id });
+  const item = row.lesson_exists ? openableRow(open) : element("li", "library-item");
   const main = element("div", "library-item-main");
   const hanzi = element("strong", "library-hanzi", row.word);
   hanzi.lang = "zh";
@@ -185,49 +215,45 @@ function wordRow(row) {
   const badges = element("div", "badges");
   const score = scoreBadge(row);
   if (score) badges.append(score);
+  if (!row.lesson_exists) badges.append(element("span", "badge", "Bài học đã bị xoá"));
   main.append(badges);
-
-  const actions = element("div", "library-actions");
-  actions.append(
-    button("control-button", "🔈", () => speak(row.word, 0.7)),
-    button("control-button", "🎙 Luyện", () =>
-      openPractice({
-        target: row.word,
-        pinyin: row.pinyin,
-        translation: row.own_meaning || row.meaning,
-        kind: "word",
-        itemId: row.word_id,
-        onScored: () => load("words"),
-      }),
+  const learned = row.status === "learned";
+  item.append(
+    main,
+    quickActions(
+      actionButton("listen", "🔊", null, () => speak(row.word, 0.7), { title: `Phát âm ${row.word}` }),
+      actionButton("practice", "🎙", null, () =>
+        openPractice({
+          target: row.word,
+          pinyin: row.pinyin,
+          translation: row.own_meaning || row.meaning,
+          kind: "word",
+          itemId: row.word_id,
+          onScored: () => load("words"),
+        }),
+      { title: "Luyện phát âm" }),
+      row.lesson_exists &&
+        actionButton("video", "🎬", null, () => handlers.openLesson(row.lesson_id, { cueId: row.cue_id, wordId: row.word_id }), {
+          title: "Xem trong video",
+        }),
+      actionButton("learned", "✓", learned ? "Đã thuộc" : "Thuộc", async () => {
+        await updateWord(row.word_id, { status: learned ? "saved" : "learned" });
+        load("words");
+        loadCounts();
+      }, { pressed: learned }),
+      actionButton("danger", "🗑", null, async () => {
+        await removeWord(row.word_id);
+        load("words");
+        loadCounts();
+      }, { title: `Xoá ${row.word} khỏi kho` }),
     ),
   );
-  if (row.lesson_exists) {
-    actions.append(
-      button("control-button", "▶ Xem trong video", () =>
-        handlers.openLesson(row.lesson_id, { cueId: row.cue_id, wordId: row.word_id }),
-      ),
-    );
-  }
-  const learned = row.status === "learned";
-  actions.append(
-    button("control-button", learned ? "↺ Học lại" : "✓ Đã thuộc", async () => {
-      await updateWord(row.word_id, { status: learned ? "saved" : "learned" });
-      load("words");
-      loadCounts();
-    }),
-    button("delete-button", "Xoá", async () => {
-      await removeWord(row.word_id);
-      load("words");
-      loadCounts();
-    }),
-  );
-  actions.firstChild.setAttribute("aria-label", `Nghe ${row.word}`);
-  item.append(main, actions);
   return item;
 }
 
 function sentenceRow(row) {
-  const item = element("li", "library-item");
+  const open = () => openStudy({ lessonId: row.lesson_id, cueId: row.cue_id });
+  const item = row.lesson_exists ? openableRow(open) : element("li", "library-item");
   const main = element("div", "library-item-main");
   const text = element("p", "library-sentence-text", row.text);
   text.lang = "zh";
@@ -238,40 +264,144 @@ function sentenceRow(row) {
   const score = scoreBadge(row);
   if (score) badges.append(score);
   main.append(badges);
-
   const learned = row.status === "learned";
-  const actions = element("div", "library-actions");
-  const listen = button("control-button", "🔈", () => speak(row.text, 0.75));
-  listen.setAttribute("aria-label", "Nghe câu");
-  actions.append(
-    listen,
-    button("control-button", "🎙 Luyện", () =>
-      openPractice({
-        target: row.text,
-        pinyin: row.pinyin,
-        translation: row.translation,
-        kind: "sentence",
-        itemId: row.sentence_id,
-        onScored: () => load("sentences"),
-      }),
+  item.append(
+    main,
+    quickActions(
+      actionButton("listen", "🔊", null, () => speak(row.text, 0.75), { title: "Nghe câu" }),
+      actionButton("practice", "🎙", null, () =>
+        openPractice({
+          target: row.text,
+          pinyin: row.pinyin,
+          translation: row.translation,
+          kind: "sentence",
+          itemId: row.sentence_id,
+          onScored: () => load("sentences"),
+        }),
+      { title: "Đọc thử câu" }),
+      row.lesson_exists &&
+        actionButton("video", "🎬", null, () => handlers.openLesson(row.lesson_id, { cueId: row.cue_id }), { title: "Xem trong video" }),
+      actionButton("learned", "✓", learned ? "Đã thuộc" : "Thuộc", async () => {
+        await updateSentence(row.lesson_id, row.cue_id, learned ? "saved" : "learned");
+        load("sentences");
+      }, { pressed: learned }),
+      actionButton("danger", "🗑", null, async () => {
+        await removeSentence(row.lesson_id, row.cue_id);
+        load("sentences");
+        loadCounts();
+      }, { title: "Xoá câu khỏi kho" }),
     ),
   );
-  if (row.lesson_exists) {
-    actions.append(
-      button("control-button", "▶ Xem trong video", () => handlers.openLesson(row.lesson_id, { cueId: row.cue_id })),
-    );
-  }
-  actions.append(
-    button("control-button", learned ? "↺ Học lại" : "✓ Đã thuộc", async () => {
-      await updateSentence(row.lesson_id, row.cue_id, learned ? "saved" : "learned");
-      load("sentences");
-    }),
-    button("delete-button", "Xoá", async () => {
-      await removeSentence(row.lesson_id, row.cue_id);
-      load("sentences");
-      loadCounts();
-    }),
-  );
-  item.append(main, actions);
   return item;
+}
+
+/* ---------- Study drawer: the same cards as the video screen ---------- */
+
+const drawer = $("#study-dialog");
+const drawerVideo = $("#study-video");
+const drawerNote = $("#study-video-note");
+const drawerSentence = $("#study-sentence");
+const drawerWord = $("#study-word");
+const lessonCache = new Map();
+let drawerState = null;
+let clipEnd = null;
+
+drawerVideo.addEventListener("timeupdate", () => {
+  if (clipEnd !== null && drawerVideo.currentTime * 1000 >= clipEnd - 80) {
+    drawerVideo.pause();
+    clipEnd = null;
+  }
+});
+$("#study-close").addEventListener("click", () => drawer.close());
+drawer.addEventListener("close", () => {
+  stopSpeaking();
+  drawerVideo.pause();
+  drawerState = null;
+  refreshLibrary();
+});
+
+async function lessonFor(lessonId) {
+  if (!lessonCache.has(lessonId)) lessonCache.set(lessonId, apiJson(`/api/lessons/${lessonId}`));
+  try {
+    return await lessonCache.get(lessonId);
+  } catch (error) {
+    lessonCache.delete(lessonId);
+    throw error;
+  }
+}
+
+function drawerContext(lesson, wordsById, cueIndexById) {
+  return {
+    lesson,
+    wordsById,
+    cueIndexById,
+    playClip: (index) => {
+      if (!lesson.media?.available) return false;
+      const cue = lesson.cues[index];
+      clipEnd = cue.end_ms;
+      drawerVideo.currentTime = cue.start_ms / 1000;
+      drawerVideo.play().catch(() => {});
+      return true;
+    },
+    pause: () => drawerVideo.pause(),
+    onChange: () => renderDrawer(),
+    showWord: (wordId, index) => {
+      drawerState.wordId = wordId;
+      drawerState.occurrence = index;
+      const cueId = wordsById.get(wordId)?.occurrences[index]?.cue_id;
+      if (cueId) drawerState.cueId = cueId;
+      renderDrawer();
+      drawerWord.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    },
+    openInVideo: (focus) => {
+      drawer.close();
+      handlers.openLesson(lesson.id, focus);
+    },
+    onClose: () => {
+      drawerState.wordId = null;
+      renderDrawer();
+    },
+  };
+}
+
+function renderDrawer() {
+  if (!drawerState) return;
+  const { lesson, wordsById, cueIndexById } = drawerState;
+  const ctx = drawerContext(lesson, wordsById, cueIndexById);
+  const cueIndex = cueIndexById.get(drawerState.cueId) ?? 0;
+  renderSentenceCard(drawerSentence, ctx, cueIndex);
+  drawerWord.hidden = !drawerState.wordId;
+  if (drawerState.wordId) renderWordCard(drawerWord, ctx, drawerState.wordId, drawerState.occurrence || 0);
+}
+
+/** Open a saved word or sentence with every study feature, without leaving the library. */
+export async function openStudy({ lessonId, cueId, wordId }) {
+  let lesson;
+  try {
+    lesson = await lessonFor(lessonId);
+  } catch (error) {
+    window.alert(error.message);
+    return;
+  }
+  const wordsById = new Map(lesson.vocabulary.map((word) => [word.id, word]));
+  const cueIndexById = new Map(lesson.cues.map((cue, index) => [cue.id, index]));
+  const occurrence = wordId ? Math.max(0, wordsById.get(wordId)?.occurrences.findIndex((item) => item.cue_id === cueId) ?? 0) : 0;
+  drawerState = { lesson, wordsById, cueIndexById, cueId, wordId, occurrence };
+  $("#study-title").textContent = lesson.filename || "Bài học";
+  if (lesson.media?.available) {
+    const source = apiUrl(lesson.media.url);
+    if (drawerVideo.dataset.lesson !== lesson.id) {
+      drawerVideo.src = source;
+      drawerVideo.dataset.lesson = lesson.id;
+    }
+    drawerVideo.hidden = false;
+    drawerNote.hidden = true;
+  } else {
+    drawerVideo.hidden = true;
+    drawerNote.hidden = false;
+    drawerNote.textContent =
+      "Video chưa được tải về máy nên “Câu gốc” sẽ đọc bằng giọng máy. Bấm 🎬 để xem đúng đoạn này trên YouTube.";
+  }
+  renderDrawer();
+  if (!drawer.open) drawer.showModal();
 }

@@ -72,3 +72,18 @@ export function scoreLabel(score) {
   if (score >= 60) return "Khá — luyện thêm chút nữa";
   return "Cần luyện thêm";
 }
+
+/**
+ * Action buttons share one look per purpose so they are told apart at a glance:
+ * listen (blue), practice (amber), lesson (violet), save (gold when on),
+ * learned (green when on), video (filled), danger (red text), plain (neutral).
+ */
+export function actionButton(kind, icon, label, onClick, { title, pressed } = {}) {
+  const node = button(`btn btn-${kind}`, null, onClick);
+  if (icon) node.append(element("span", "btn-icon", icon));
+  if (label) node.append(element("span", "btn-label", label));
+  if (title) node.title = title;
+  if (!label) node.setAttribute("aria-label", title || icon);
+  if (pressed !== undefined) node.setAttribute("aria-pressed", String(Boolean(pressed)));
+  return node;
+}

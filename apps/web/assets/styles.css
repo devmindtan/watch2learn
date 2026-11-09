@@ -399,3 +399,62 @@ main { width: min(1560px, 100%); margin: 0 auto; }
 .lesson-example-zh { font: 600 1.02rem var(--cjk); }
 .lesson-example-pinyin { color: var(--jade); font-size: .85rem; }
 @media (max-width: 760px) { .voice-button-label { display: none; } }
+
+/* ---------- Action buttons: one look per purpose ---------- */
+:root {
+  --listen-bg: #e8f1fb; --listen-line: #b6d0ee; --listen-ink: #1b4e86;
+  --practice-bg: #fff1dd; --practice-line: #efc98e; --practice-ink: #85480c;
+  --lesson-bg: #f1ecfb; --lesson-line: #cfc1ef; --lesson-ink: #4c3191;
+  --save-on-bg: #fff3cf; --save-on-line: #e3b33f; --save-on-ink: #6f4b00;
+}
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink);
+  font-size: .86rem; font-weight: 650; white-space: nowrap; transition: filter .12s, box-shadow .12s;
+}
+.btn:hover:not(:disabled) { filter: brightness(.97); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+.btn-icon { font-size: 1rem; line-height: 1; }
+.btn:not(:has(.btn-label)) { width: 38px; padding: 0; }
+.btn-listen { background: var(--listen-bg); border-color: var(--listen-line); color: var(--listen-ink); }
+.btn-practice { background: var(--practice-bg); border-color: var(--practice-line); color: var(--practice-ink); }
+.btn-lesson { background: var(--lesson-bg); border-color: var(--lesson-line); color: var(--lesson-ink); }
+.btn-save[aria-pressed="true"] { background: var(--save-on-bg); border-color: var(--save-on-line); color: var(--save-on-ink); }
+.btn-learned { border-color: #9fd2b9; color: var(--jade-dark); }
+.btn-learned[aria-pressed="true"] { background: var(--jade); border-color: var(--jade); color: #fff; }
+.btn-video { background: var(--ink); border-color: var(--ink); color: #fff; }
+.btn-danger { border-color: transparent; background: transparent; color: var(--danger); }
+.btn-danger:hover { background: #fbeceb; }
+.btn-plain[aria-pressed="true"] { background: var(--jade); border-color: var(--jade); color: #fff; }
+.action-groups { display: grid; gap: 6px; margin-top: 12px; }
+.action-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.action-row[data-label]::before {
+  content: attr(data-label); width: 34px; flex: none; color: var(--muted);
+  font-size: .68rem; font-weight: 750; letter-spacing: .06em; text-transform: uppercase;
+}
+.card-kicker { margin: 0; color: var(--muted); font-size: .72rem; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+
+/* ---------- Library: full width ---------- */
+main:has(> #library:not([hidden])) { width: 100%; }
+.library { width: 100%; max-width: none; margin: 0; padding: 16px clamp(14px, 2vw, 24px) 48px; }
+.library-videos { grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); }
+.video-grid { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+.video-card .btn-danger { position: absolute; top: 8px; right: 8px; background: rgba(255, 255, 255, .92); }
+.library-item[tabindex] { cursor: pointer; }
+.library-item[tabindex]:hover { border-color: var(--jade); box-shadow: 0 2px 8px rgba(20, 100, 80, .08); }
+.library-actions { align-self: center; }
+
+/* ---------- Study drawer (library) ---------- */
+.study-drawer {
+  position: fixed; inset: 0 0 0 auto; width: min(640px, 100vw); height: 100vh; max-height: none; margin: 0;
+  padding: 0; border: 0; border-left: 1px solid var(--line); background: var(--paper); color: var(--ink);
+}
+.study-drawer::backdrop { background: rgba(15, 20, 18, .4); }
+.study-drawer[open] { display: flex; flex-direction: column; }
+.study-drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.study-drawer-head h2 { font-size: 1.05rem; }
+.study-drawer-body { flex: 1; overflow-y: auto; display: grid; gap: 14px; align-content: start; padding: 16px 20px 32px; }
+.study-video { width: 100%; max-height: 260px; border-radius: var(--radius); background: #000; }
+.study-sentence { padding: 16px 18px; }
+.study-sentence .now-text { margin: 8px 0 4px; }
+.study-word { max-height: none; border: 1px solid var(--line); border-radius: var(--radius); }
+.study-drawer .study-word { position: static; box-shadow: none; max-height: none; border-radius: var(--radius); }
