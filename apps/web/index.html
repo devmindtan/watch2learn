@@ -135,6 +135,8 @@
         </section>
         </div>
 
+        <div id="library-study" class="library-study" hidden>
+        <div class="library-study-list">
         <div id="library-words" class="library-panel" role="tabpanel" hidden>
           <div class="library-toolbar">
             <div class="segmented" role="group" aria-label="Lọc từ">
@@ -159,6 +161,27 @@
           </div>
           <p id="sentences-empty" class="muted library-empty" hidden></p>
           <ol id="sentences-list" class="library-list"></ol>
+        </div>
+        </div>
+
+        <aside id="study-pane" class="study-pane" aria-labelledby="study-title" tabindex="-1">
+          <div class="study-pane-head">
+            <div>
+              <p class="card-kicker">Học trong ngữ cảnh</p>
+              <h2 id="study-title">Chọn một mục để học</h2>
+            </div>
+            <button id="study-close" class="close-button" type="button" aria-label="Đóng">×</button>
+          </div>
+          <p id="study-placeholder" class="muted study-placeholder">Bấm vào một từ hoặc câu bên trái để xem chi tiết, nghe giảng và luyện phát âm.</p>
+          <div id="study-body" class="study-pane-body" hidden>
+            <div class="study-col">
+              <video id="study-video" class="study-video" controls preload="metadata" playsinline hidden></video>
+              <p id="study-video-note" class="sense-note" hidden></p>
+              <section id="study-sentence" class="card study-sentence"></section>
+            </div>
+            <section id="study-word" class="word-card study-word study-col" hidden></section>
+          </div>
+        </aside>
         </div>
       </section>
 
@@ -262,22 +285,6 @@
           <button class="primary-button" value="save">Lưu giọng đọc</button>
         </div>
       </form>
-    </dialog>
-
-    <dialog id="study-dialog" class="study-drawer" aria-labelledby="study-title">
-      <div class="study-drawer-head">
-        <div>
-          <p class="card-kicker">Học từ thư viện</p>
-          <h2 id="study-title">Bài học</h2>
-        </div>
-        <button id="study-close" class="close-button" type="button" aria-label="Đóng">×</button>
-      </div>
-      <div class="study-drawer-body">
-        <video id="study-video" class="study-video" controls preload="metadata" playsinline hidden></video>
-        <p id="study-video-note" class="sense-note" hidden></p>
-        <section id="study-sentence" class="card study-sentence"></section>
-        <section id="study-word" class="word-card study-word" hidden></section>
-      </div>
     </dialog>
 
     <dialog id="practice-dialog" class="practice-dialog" aria-label="Luyện phát âm">

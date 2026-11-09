@@ -10,6 +10,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from . import prepare
 from .gpu_host import GPU
 from .subtitles import Cue
 
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def call(path: str, body: bytes, content_type: str, timeout: float = TIMEOUT_SECONDS):
+    prepare.note_speech()  # lesson preparation yields the shared card meanwhile
     base = GPU.endpoint("speech")
     if not base:
         return None

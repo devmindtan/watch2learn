@@ -237,3 +237,21 @@ a defect that escaped a completed check, or a manual task repeated at least twic
   the app fails to load. Health checks must not wait on GPU tunnel locks.
 - Verification: `test_ui_files_are_always_revalidated`; Playwright on port 8000
   shows "Máy này" with no page errors.
+
+## 2026-11-09 — Lessons written ahead, shared across videos; one page gutter
+
+- Evidence: the learner found lessons slow because they were written on click, and
+  the spoken lesson too long; the library word page left wide empty space and the
+  right-side drawer was cramped; removing page padding broke the left edge
+  alignment with the top bar.
+- Root cause: the word prompt contained the video sentence, so the cache could not
+  be shared between videos; nothing wrote lessons before a click; each page and
+  the top bar had its own side padding.
+- Reusable rule: keep generated learning content context-free when it can be
+  (context stays in deterministic fields shown beside it) so it is cached once
+  per word; write it in a resumable background pass after import, on the GPU
+  machine only. Spoken lessons cover only the essentials; the read view shows all.
+  Every page and the top bar use the single `--gutter` token.
+- Verification: `test_preparation_writes_every_lesson_once`, the word lesson test
+  (another cue reuses the cache); Playwright at 1600 px measures the same left
+  edge for brand, tabs, lists and the video stage; 390 px has no horizontal scroll.

@@ -53,6 +53,8 @@ export function showLibraryTab(name) {
     tab.tabIndex = selected ? 0 : -1;
     $(`#library-${tab.dataset.libraryTab}`).hidden = !selected;
   });
+  $("#library-study").hidden = name === "videos";
+  closeStudy();
   refreshLibrary();
 }
 
@@ -107,6 +109,8 @@ function videoCard(item) {
   const badges = element("span", "badges");
   if (item.source_kind === "youtube") badges.append(element("span", "badge", "YouTube"));
   if (item.has_media) badges.append(element("span", "badge badge-saved", "Đã lưu video"));
+  const prepared = preparedLabel(item.prepared);
+  if (prepared) badges.append(prepared);
   open.append(
     thumb,
     element("span", "video-title", item.filename),
@@ -131,6 +135,17 @@ function videoCard(item) {
   remove.setAttribute("aria-label", remove.title);
   card.append(open, remove);
   return card;
+}
+
+/** Progress of the AI lessons written ahead of time for this video. */
+function preparedLabel(prepared) {
+  if (!prepared?.total) return null;
+  const { done, total, state, reason } = prepared;
+  if (state === "complete" || done >= total) return element("span", "badge badge-saved", "Bài giảng sẵn sàng");
+  const badge = element("span", "badge", `Đang soạn bài giảng ${done}/${total}`);
+  if (reason) badge.title = reason;
+  if (state === "waiting" || state === "paused" || state === "error") badge.textContent += ` · ${reason || "tạm dừng"}`;
+  return badge;
 }
 
 async function load(kind) {
@@ -163,6 +178,24 @@ function render(kind) {
       ? "Chưa có từ nào. Trong bài học, bấm vào một từ rồi chọn “Lưu” hoặc “Đã thuộc”."
       : "Chưa có câu nào. Trong bài học, bấm “Lưu câu” ở khung câu đang học.";
   view.list.replaceChildren(...rows.map(kind === "words" ? wordRow : sentenceRow));
+  markSelection();
+  const first = rows.find((row) => row.lesson_exists);
+  if (wideScreen.matches && !selection && first) {
+    openStudy(kind === "words" ? studyTarget(first) : sentenceTarget(first), { focus: false });
+  }
+}
+
+const studyTarget = (row) => ({ lessonId: row.lesson_id, cueId: row.cue_id, wordId: row.word_id });
+const sentenceTarget = (row) => ({ lessonId: row.lesson_id, cueId: row.cue_id });
+const keyOf = ({ lessonId, cueId, wordId }) => (wordId ? `w:${wordId}` : `s:${lessonId}/${cueId}`);
+
+function markSelection() {
+  document.querySelectorAll(".library-item[data-key]").forEach((item) => {
+    const selected = item.dataset.key === selection;
+    item.classList.toggle("is-selected", selected);
+    if (selected) item.setAttribute("aria-current", "true");
+    else item.removeAttribute("aria-current");
+  });
 }
 
 function scoreBadge(row) {
@@ -184,8 +217,9 @@ function quickActions(...buttons) {
   return actions;
 }
 
-function openableRow(onOpen) {
+function openableRow(onOpen, target) {
   const item = element("li", "library-item");
+  item.dataset.key = keyOf(target);
   item.tabIndex = 0;
   item.addEventListener("click", onOpen);
   item.addEventListener("keydown", (event) => {
@@ -198,8 +232,8 @@ function openableRow(onOpen) {
 }
 
 function wordRow(row) {
-  const open = () => openStudy({ lessonId: row.lesson_id, cueId: row.cue_id, wordId: row.word_id });
-  const item = row.lesson_exists ? openableRow(open) : element("li", "library-item");
+  const open = () => openStudy(studyTarget(row));
+  const item = row.lesson_exists ? openableRow(open, studyTarget(row)) : element("li", "library-item");
   const main = element("div", "library-item-main");
   const hanzi = element("strong", "library-hanzi", row.word);
   hanzi.lang = "zh";
@@ -209,8 +243,8 @@ function wordRow(row) {
   if (row.sentence) {
     const sentence = element("p", "library-sentence", row.sentence);
     sentence.lang = "zh";
+    sentence.title = row.sentence_translation || "";
     main.append(sentence);
-    if (row.sentence_translation) main.append(element("p", "library-translation", row.sentence_translation));
   }
   const badges = element("div", "badges");
   const score = scoreBadge(row);
@@ -222,25 +256,22 @@ function wordRow(row) {
     main,
     quickActions(
       actionButton("listen", "🔊", null, () => speak(row.word, 0.7), { title: `Phát âm ${row.word}` }),
-      actionButton("practice", "🎙", null, () =>
-        openPractice({
-          target: row.word,
-          pinyin: row.pinyin,
-          translation: row.own_meaning || row.meaning,
-          kind: "word",
-          itemId: row.word_id,
-          onScored: () => load("words"),
-        }),
-      { title: "Luyện phát âm" }),
-      row.lesson_exists &&
-        actionButton("video", "🎬", null, () => handlers.openLesson(row.lesson_id, { cueId: row.cue_id, wordId: row.word_id }), {
-          title: "Xem trong video",
-        }),
-      actionButton("learned", "✓", learned ? "Đã thuộc" : "Thuộc", async () => {
+      !row.lesson_exists &&
+        actionButton("practice", "🎙", null, () =>
+          openPractice({
+            target: row.word,
+            pinyin: row.pinyin,
+            translation: row.own_meaning || row.meaning,
+            kind: "word",
+            itemId: row.word_id,
+            onScored: () => load("words"),
+          }),
+        { title: "Luyện phát âm" }),
+      actionButton("learned", "✓", null, async () => {
         await updateWord(row.word_id, { status: learned ? "saved" : "learned" });
         load("words");
         loadCounts();
-      }, { pressed: learned }),
+      }, { pressed: learned, title: learned ? "Đã thuộc — bấm để học lại" : "Đánh dấu đã thuộc" }),
       actionButton("danger", "🗑", null, async () => {
         await removeWord(row.word_id);
         load("words");
@@ -252,8 +283,8 @@ function wordRow(row) {
 }
 
 function sentenceRow(row) {
-  const open = () => openStudy({ lessonId: row.lesson_id, cueId: row.cue_id });
-  const item = row.lesson_exists ? openableRow(open) : element("li", "library-item");
+  const open = () => openStudy(sentenceTarget(row));
+  const item = row.lesson_exists ? openableRow(open, sentenceTarget(row)) : element("li", "library-item");
   const main = element("div", "library-item-main");
   const text = element("p", "library-sentence-text", row.text);
   text.lang = "zh";
@@ -269,22 +300,10 @@ function sentenceRow(row) {
     main,
     quickActions(
       actionButton("listen", "🔊", null, () => speak(row.text, 0.75), { title: "Nghe câu" }),
-      actionButton("practice", "🎙", null, () =>
-        openPractice({
-          target: row.text,
-          pinyin: row.pinyin,
-          translation: row.translation,
-          kind: "sentence",
-          itemId: row.sentence_id,
-          onScored: () => load("sentences"),
-        }),
-      { title: "Đọc thử câu" }),
-      row.lesson_exists &&
-        actionButton("video", "🎬", null, () => handlers.openLesson(row.lesson_id, { cueId: row.cue_id }), { title: "Xem trong video" }),
-      actionButton("learned", "✓", learned ? "Đã thuộc" : "Thuộc", async () => {
+      actionButton("learned", "✓", null, async () => {
         await updateSentence(row.lesson_id, row.cue_id, learned ? "saved" : "learned");
         load("sentences");
-      }, { pressed: learned }),
+      }, { pressed: learned, title: learned ? "Đã thuộc — bấm để học lại" : "Đánh dấu đã thuộc" }),
       actionButton("danger", "🗑", null, async () => {
         await removeSentence(row.lesson_id, row.cue_id);
         load("sentences");
@@ -295,30 +314,46 @@ function sentenceRow(row) {
   return item;
 }
 
-/* ---------- Study drawer: the same cards as the video screen ---------- */
+/* ---------- Study pane: the same cards as the video screen ---------- */
 
-const drawer = $("#study-dialog");
-const drawerVideo = $("#study-video");
-const drawerNote = $("#study-video-note");
-const drawerSentence = $("#study-sentence");
-const drawerWord = $("#study-word");
+// Wide screens: list on the left, a roomy study pane on the right (first item is
+// opened automatically). Narrow screens: the pane opens full screen on a tap.
+const wideScreen = window.matchMedia("(min-width: 1001px)");
+const pane = $("#study-pane");
+const paneBody = $("#study-body");
+const placeholder = $("#study-placeholder");
+const paneVideo = $("#study-video");
+const paneNote = $("#study-video-note");
+const paneSentence = $("#study-sentence");
+const paneWord = $("#study-word");
 const lessonCache = new Map();
-let drawerState = null;
+let paneState = null;
+let selection = null;
 let clipEnd = null;
 
-drawerVideo.addEventListener("timeupdate", () => {
-  if (clipEnd !== null && drawerVideo.currentTime * 1000 >= clipEnd - 80) {
-    drawerVideo.pause();
+paneVideo.addEventListener("timeupdate", () => {
+  if (clipEnd !== null && paneVideo.currentTime * 1000 >= clipEnd - 80) {
+    paneVideo.pause();
     clipEnd = null;
   }
 });
-$("#study-close").addEventListener("click", () => drawer.close());
-drawer.addEventListener("close", () => {
-  stopSpeaking();
-  drawerVideo.pause();
-  drawerState = null;
-  refreshLibrary();
+$("#study-close").addEventListener("click", () => closeStudy());
+pane.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !wideScreen.matches) closeStudy();
 });
+
+function closeStudy() {
+  stopSpeaking();
+  paneVideo.pause();
+  paneState = null;
+  selection = null;
+  pane.classList.remove("is-open");
+  document.body.classList.remove("study-open");
+  paneBody.hidden = true;
+  placeholder.hidden = false;
+  $("#study-title").textContent = "Chọn một mục để học";
+  markSelection();
+}
 
 async function lessonFor(lessonId) {
   if (!lessonCache.has(lessonId)) lessonCache.set(lessonId, apiJson(`/api/lessons/${lessonId}`));
@@ -330,7 +365,7 @@ async function lessonFor(lessonId) {
   }
 }
 
-function drawerContext(lesson, wordsById, cueIndexById) {
+function paneContext(lesson, wordsById, cueIndexById) {
   return {
     lesson,
     wordsById,
@@ -339,43 +374,51 @@ function drawerContext(lesson, wordsById, cueIndexById) {
       if (!lesson.media?.available) return false;
       const cue = lesson.cues[index];
       clipEnd = cue.end_ms;
-      drawerVideo.currentTime = cue.start_ms / 1000;
-      drawerVideo.play().catch(() => {});
+      paneVideo.currentTime = cue.start_ms / 1000;
+      paneVideo.play().catch(() => {});
       return true;
     },
-    pause: () => drawerVideo.pause(),
-    onChange: () => renderDrawer(),
+    pause: () => paneVideo.pause(),
+    onChange: () => {
+      renderPane();
+      if (current !== "videos") load(current);
+      loadCounts();
+    },
     showWord: (wordId, index) => {
-      drawerState.wordId = wordId;
-      drawerState.occurrence = index;
+      paneState.wordId = wordId;
+      paneState.occurrence = index;
       const cueId = wordsById.get(wordId)?.occurrences[index]?.cue_id;
-      if (cueId) drawerState.cueId = cueId;
-      renderDrawer();
-      drawerWord.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      if (cueId) paneState.cueId = cueId;
+      renderPane();
+      paneWord.scrollIntoView({ block: "nearest", behavior: "smooth" });
     },
     openInVideo: (focus) => {
-      drawer.close();
+      closeStudy();
       handlers.openLesson(lesson.id, focus);
     },
     onClose: () => {
-      drawerState.wordId = null;
-      renderDrawer();
+      paneState.wordId = null;
+      renderPane();
     },
   };
 }
 
-function renderDrawer() {
-  if (!drawerState) return;
-  const { lesson, wordsById, cueIndexById } = drawerState;
-  const ctx = drawerContext(lesson, wordsById, cueIndexById);
-  const cueIndex = cueIndexById.get(drawerState.cueId) ?? 0;
-  renderSentenceCard(drawerSentence, ctx, cueIndex);
-  drawerWord.hidden = !drawerState.wordId;
-  if (drawerState.wordId) renderWordCard(drawerWord, ctx, drawerState.wordId, drawerState.occurrence || 0);
+function renderPane() {
+  if (!paneState) return;
+  const { lesson, wordsById, cueIndexById } = paneState;
+  const ctx = paneContext(lesson, wordsById, cueIndexById);
+  const cueIndex = cueIndexById.get(paneState.cueId) ?? 0;
+  renderSentenceCard(paneSentence, ctx, cueIndex);
+  paneWord.hidden = !paneState.wordId;
+  paneBody.classList.toggle("has-word", Boolean(paneState.wordId));
+  if (paneState.wordId) renderWordCard(paneWord, ctx, paneState.wordId, paneState.occurrence || 0);
 }
 
 /** Open a saved word or sentence with every study feature, without leaving the library. */
-export async function openStudy({ lessonId, cueId, wordId }) {
+export async function openStudy(target, { focus = true } = {}) {
+  const { lessonId, cueId, wordId } = target;
+  selection = keyOf(target);
+  markSelection();
   let lesson;
   try {
     lesson = await lessonFor(lessonId);
@@ -383,25 +426,34 @@ export async function openStudy({ lessonId, cueId, wordId }) {
     window.alert(error.message);
     return;
   }
+  if (selection !== keyOf(target)) return; // another row was chosen meanwhile
+  stopSpeaking();
   const wordsById = new Map(lesson.vocabulary.map((word) => [word.id, word]));
   const cueIndexById = new Map(lesson.cues.map((cue, index) => [cue.id, index]));
   const occurrence = wordId ? Math.max(0, wordsById.get(wordId)?.occurrences.findIndex((item) => item.cue_id === cueId) ?? 0) : 0;
-  drawerState = { lesson, wordsById, cueIndexById, cueId, wordId, occurrence };
+  paneState = { lesson, wordsById, cueIndexById, cueId, wordId, occurrence };
   $("#study-title").textContent = lesson.filename || "Bài học";
   if (lesson.media?.available) {
     const source = apiUrl(lesson.media.url);
-    if (drawerVideo.dataset.lesson !== lesson.id) {
-      drawerVideo.src = source;
-      drawerVideo.dataset.lesson = lesson.id;
+    if (paneVideo.dataset.lesson !== lesson.id) {
+      paneVideo.src = source;
+      paneVideo.dataset.lesson = lesson.id;
     }
-    drawerVideo.hidden = false;
-    drawerNote.hidden = true;
+    paneVideo.hidden = false;
+    paneNote.hidden = true;
   } else {
-    drawerVideo.hidden = true;
-    drawerNote.hidden = false;
-    drawerNote.textContent =
+    paneVideo.hidden = true;
+    paneNote.hidden = false;
+    paneNote.textContent =
       "Video chưa được tải về máy nên “Câu gốc” sẽ đọc bằng giọng máy. Bấm 🎬 để xem đúng đoạn này trên YouTube.";
   }
-  renderDrawer();
-  if (!drawer.open) drawer.showModal();
+  placeholder.hidden = true;
+  paneBody.hidden = false;
+  renderPane();
+  pane.scrollTop = 0;
+  if (!wideScreen.matches) {
+    pane.classList.add("is-open");
+    document.body.classList.add("study-open");
+  }
+  if (focus) pane.focus({ preventScroll: wideScreen.matches });
 }

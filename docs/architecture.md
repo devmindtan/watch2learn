@@ -118,15 +118,25 @@ that sentence; other readings stay available as `alternatives`.
   aligned so missing/extra syllables are penalised. It is an estimate: tones come
   from the recognised words, not from pitch analysis. Best/last scores are kept
   for saved items.
-- Spoken lessons are Vietnamese and follow a fixed teaching order. Word: how it is
-  read, what it means, what to watch when pronouncing it, where it is met in
-  conversation, how it is used in practice (+ examples). Sentence: how it is read,
-  meaning word by word, pronunciation notes, structure, when it is said (+
-  examples). The first three parts are built from verified data (context pinyin,
-  tones, CVDICT, `pronunciation.learner_tips` for Vietnamese speakers) and play at
-  once; the rest is written by the local Ollama model, streamed as NDJSON from
-  `POST /api/explain` section by section, cached, and labelled as AI. Chinese
-  grammar terms in the model's prose are replaced by Vietnamese ones.
+- Lessons are Vietnamese. "Xem chi tiết" shows every part to read; "Nghe giảng"
+  speaks only the important parts, briefly. Word: reading, meaning (with the sense
+  used in this sentence), pronunciation notes, where/how it is used, how native
+  speakers say it (examples), and a special note only when there is one. Sentence:
+  reading, meaning word by word, pronunciation notes, structure, when it is said,
+  similar sentences. Reading, meaning and pronunciation notes come from verified
+  data (context pinyin, tones, CVDICT, `pronunciation.learner_tips`); the rest is
+  written by the local Ollama model and labelled as AI. Chinese grammar terms in
+  the model's prose are replaced by Vietnamese ones.
+- The word lesson prompt is context-free (word, dictionary reading, meanings), so
+  the `explanations` cache works as a global dictionary: a word written for one
+  video is reused by every later video. `prepare.py` writes every word lesson
+  (most frequent first) and then every sentence lesson of a video in one
+  background thread after import and at startup; it is resumable and skips cached
+  items. It runs only where the machine rule allows a long model run (GPU machine,
+  an explicit `WATCH2LEARN_OLLAMA_URL`, or `WATCH2LEARN_PREPARE_LOCAL=1`), pauses
+  and unloads the model while speech models use the shared card, and reports
+  progress as `prepared` on `GET /api/lessons[/{id}]`. `POST /api/explain` streams
+  a lesson from the cache, or writes it on demand when it is not ready yet.
 - Reading aloud uses `POST /api/tts`: VieNeu-TTS (Vietnamese) and Kokoro (Chinese)
   on the backend, loudness-matched, cached per phrase (`data/tts-cache/parts`) and
   per chunk; the browser splits narration into sentence chunks and plays each as

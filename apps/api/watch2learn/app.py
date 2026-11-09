@@ -20,12 +20,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from pypinyin.contrib.tone_convert import to_tone, to_tone3
+from pypinyin.contrib.tone_convert import to_tone
 
 from . import (
     explain,
     jobs,
     learning,
+    prepare,
     pronunciation,
     remote_speech,
     security,
@@ -330,6 +331,7 @@ def run_video_job(
             report("saving-video", 98)
             storage.store_media(job_id, Path(source))
         jobs.complete(job_id, {"filename": filename, **lesson, "id": job_id, "language": "zh"})
+        prepare.enqueue(job_id)  # write every word/sentence lesson in the background
     except Exception as error:
         jobs.fail(job_id, f"{type(error).__name__}: {error}")
     finally:
@@ -472,6 +474,7 @@ async def list_lessons() -> list[dict]:
                 "has_media": has_media,
                 "thumbnail_url": thumbnail_url(item, has_media),
                 "learned_count": len(word_ids & learned),
+                "prepared": prepare.status(item["id"]),
             }
         )
     return lessons
@@ -499,7 +502,8 @@ async def saved_lesson(lesson_id: str) -> dict:
     current = await asyncio.to_thread(ensure_current_analysis, lesson_id)
     lesson = add_vietnamese_definitions(current, load_cedict(), load_vietnamese())
     lesson.setdefault("source", {"kind": "file", "filename": lesson.get("filename")})
-    return lesson | {"id": lesson_id, "media": storage.media_info(lesson_id)}
+    media = storage.media_info(lesson_id)
+    return lesson | {"id": lesson_id, "media": media, "prepared": prepare.status(lesson_id)}
 
 
 @app.delete("/api/lessons/{lesson_id}", status_code=204)
@@ -666,7 +670,8 @@ def warm_up_voices() -> None:
 
 def upgrade_saved_lessons() -> None:
     """At startup, bring every saved lesson to the current analysis and translation
-    rules in the background so opening a lesson never waits for it."""
+    rules in the background so opening a lesson never waits for it, then queue the
+    lessons the AI has not written yet."""
     for lesson_id in jobs.completed_ids():
         try:
             ensure_current_analysis(lesson_id)
@@ -674,6 +679,7 @@ def upgrade_saved_lessons() -> None:
                 ensure_current_translation(lesson_id)
         except Exception as error:  # keep upgrading the remaining lessons
             logger.warning("Could not upgrade translation of %s: %s", lesson_id, error)
+        prepare.enqueue(lesson_id)
 
 
 @app.post("/api/lessons/{lesson_id}/translations")
@@ -876,45 +882,6 @@ class ExplainRequest(BaseModel):
     cue_id: str | None = Field(default=None, max_length=64)
 
 
-def sentence_words(lesson: dict, cue: dict) -> list[dict]:
-    """Dictionary meaning of each word in the cue, in sentence order."""
-    words = {item["id"]: item for item in lesson.get("vocabulary", [])}
-    glossary = []
-    for segment in cue.get("segments", []):
-        word = words.get(segment.get("vocabulary_id"))
-        if not word:
-            continue
-        meanings = [item for item in word.get("definitions_vi", []) if ":" not in item[:3]]
-        glossary.append(
-            {
-                "word": segment["text"],
-                "pinyin": segment.get("pinyin"),
-                "meaning": meanings[0] if meanings else None,
-            }
-        )
-    return glossary
-
-
-def pronunciation_facts(text: str, marked_pinyin: str | None = None) -> dict:
-    """Readings (as shown to the learner when given), tones and hints for Vietnamese speakers."""
-    pairs = pronunciation.han_syllables(text)
-    marked = (marked_pinyin or "").split()
-    if marked and len(marked) == len(pairs):
-        pairs = [
-            (character, to_tone3(syllable, neutral_tone_with_five=True))
-            for (character, _), syllable in zip(pairs, marked, strict=True)
-        ]
-    syllables = [
-        {
-            "character": character,
-            "pinyin": to_tone(syllable),
-            "tone": int(syllable[-1]) if syllable[-1:].isdigit() else 5,
-        }
-        for character, syllable in pairs
-    ]
-    return {"syllables": syllables, "tips": pronunciation.learner_tips(pairs)}
-
-
 def explanation_events(facts: dict, lesson_events) -> Iterator[bytes]:
     """NDJSON: facts first, then each section/example as the model finishes it."""
 
@@ -949,23 +916,17 @@ async def explain_text(request: ExplainRequest) -> StreamingResponse:
         word = next((item for item in lesson["vocabulary"] if item["id"] == request.word_id), None)
         if not word:
             raise HTTPException(status_code=404, detail="Word was not found in this lesson")
-        fields = learning.word_fields(lesson, request.word_id, request.cue_id)
         occurrence = next(
-            (item for item in word["occurrences"] if item["cue_id"] == fields["cue_id"]),
+            (item for item in word["occurrences"] if item["cue_id"] == request.cue_id),
             word["occurrences"][0],
         )
-        facts = pronunciation_facts(occurrence["surface"], occurrence.get("pinyin"))
-        events = explain.word_lesson(
-            word, facts, fields["sentence"] or "", fields["sentence_translation"]
-        )
+        # The reading shown follows this sentence; the lesson itself is shared by every video.
+        facts = explain.pronunciation_facts(occurrence["surface"], occurrence.get("pinyin"))
+        events = explain.stream_lesson(*explain.word_request(word))
     elif request.cue_id:
         cue = find_cue(lesson, request.cue_id)
-        pinyin = " ".join(item["pinyin"] for item in cue["segments"] if item.get("pinyin"))
-        facts = pronunciation_facts(cue["text"], pinyin)
-        facts["tips"] = facts["tips"][:6]
-        events = explain.sentence_lesson(
-            cue["text"], cue.get("translation_vi"), sentence_words(lesson, cue), facts
-        )
+        facts = explain.sentence_facts(cue)
+        events = explain.stream_lesson(*explain.sentence_request(lesson, cue))
     else:
         raise HTTPException(status_code=422, detail="word_id or cue_id is required")
     return StreamingResponse(

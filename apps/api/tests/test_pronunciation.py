@@ -83,9 +83,9 @@ def read_events(body: dict) -> list[dict]:
 
 
 WORD_REPLY = (
-    "<giao_tiep>Hay gặp ở trường, 动词 dùng trang trọng vừa phải.</giao_tiep>\n"
-    "<su_dung>Thường đi với 中文 (tiếng Trung).</su_dung>\n"
-    "<vi_du>我们一起学习。 | Chúng ta cùng học.</vi_du>\n<vi_du>không có chữ Hán | x</vi_du>"
+    "<cach_dung>Hay gặp ở trường, 动词 đi với 中文 (tiếng Trung).</cach_dung>\n"
+    "<vi_du>我们一起学习。 | Chúng ta cùng học.</vi_du>\n<vi_du>không có chữ Hán | x</vi_du>\n"
+    "<luu_y>Không có gì đặc biệt.</luu_y>"
 )
 
 
@@ -93,7 +93,7 @@ def test_word_lesson_streams_vietnamese_sections_and_is_cached(monkeypatch, tmp_
     lesson_id = make_lesson(monkeypatch, tmp_path)
     prompts = []
 
-    def fake_stream(prompt):
+    def fake_stream(prompt, base_url=None):
         prompts.append(prompt)
         for start in range(0, len(WORD_REPLY), 7):  # tags arrive split across chunks
             yield WORD_REPLY[start : start + 7]
@@ -108,8 +108,8 @@ def test_word_lesson_streams_vietnamese_sections_and_is_cached(monkeypatch, tmp_
         {"character": "习", "pinyin": "xí", "tone": 2},
     ]
     sections = {event["key"]: event["text"] for event in events if event["type"] == "section"}
-    assert list(sections) == ["giao_tiep", "su_dung"]
-    assert sections["giao_tiep"] == "Hay gặp ở trường, động từ dùng trang trọng vừa phải."
+    assert list(sections) == ["cach_dung"]  # "nothing special" notes are dropped
+    assert sections["cach_dung"] == "Hay gặp ở trường, động từ đi với 中文 (tiếng Trung)."
     examples = [event for event in events if event["type"] == "example"]
     assert examples == [
         {
@@ -120,7 +120,8 @@ def test_word_lesson_streams_vietnamese_sections_and_is_cached(monkeypatch, tmp_
         }
     ]
     assert events[-1] == {"type": "done", "cached": False}
-    assert "gần “x” tiếng Việt" in prompts[0] and "今天学习中文。" in prompts[0]
+    # One shared lesson per word: the video sentence is not part of the prompt.
+    assert "gần “x” tiếng Việt" in prompts[0] and "今天学习中文。" not in prompts[0]
     assert events[0]["facts"]["tips"][0].startswith("Chữ 学:")
 
     again = read_events(body)
@@ -128,13 +129,39 @@ def test_word_lesson_streams_vietnamese_sections_and_is_cached(monkeypatch, tmp_
     assert [event.get("text") for event in again[1:-1]] == [
         event.get("text") for event in events[1:-1]
     ]
+    other_cue = read_events(body | {"cue_id": "cue-1"})
+    assert len(prompts) == 1 and other_cue[-1]["cached"]
+
+
+def test_preparation_writes_every_lesson_once(monkeypatch, tmp_path):
+    from watch2learn import jobs, prepare
+
+    lesson_id = make_lesson(monkeypatch, tmp_path)
+    prompts = []
+
+    def fake_stream(prompt, base_url=None):
+        prompts.append(base_url)
+        yield "<cach_dung>Dùng hằng ngày.</cach_dung><cau_truc>Chủ ngữ rồi động từ.</cau_truc>"
+
+    monkeypatch.setattr(explain, "stream_ollama", fake_stream)
+    monkeypatch.setattr(prepare, "model_url", lambda: "http://gpu")
+    lesson = jobs.get(lesson_id)["result"]
+    total = len(explain.lesson_requests(lesson))
+    assert total > len(lesson["vocabulary"])  # words, then sentences
+
+    prepare.prepare_lesson(lesson_id)
+    state = prepare.status(lesson_id)
+    assert (state["state"], state["done"], state["total"]) == ("complete", total, total)
+    assert prompts == ["http://gpu"] * total
+    prepare.prepare_lesson(lesson_id)  # idempotent: nothing is written twice
+    assert len(prompts) == total
 
 
 def test_sentence_lesson_and_offline_fallback(monkeypatch, tmp_path):
     lesson_id = make_lesson(monkeypatch, tmp_path)
     prompts = []
 
-    def fake_stream(prompt):
+    def fake_stream(prompt, base_url=None):
         prompts.append(prompt)
         yield "<giao_tiep>Nói khi kể lịch học.</giao_tiep><cau_truc>Thời gian đứng trước động từ."
         yield "</cau_truc><vi_du>明天学习。 | Ngày mai học.</vi_du>"
@@ -145,7 +172,7 @@ def test_sentence_lesson_and_offline_fallback(monkeypatch, tmp_path):
     assert "学习 = học" in prompts[0]
     assert [item["character"] for item in events[0]["facts"]["syllables"]][:2] == ["今", "天"]
 
-    def offline(prompt):
+    def offline(prompt, base_url=None):
         raise OSError("connection refused")
         yield ""
 
