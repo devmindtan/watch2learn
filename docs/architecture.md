@@ -133,6 +133,10 @@ that sentence; other readings stay available as `alternatives`.
   soon as it is ready. Voices are chosen in the UI and stored server-side
   (`GET/PUT /api/voices`). Browser Web Speech voices are only a fallback.
 
+- Heavy models (Whisper, VieNeu/Kokoro, Ollama) run on the user's GPU machine over
+  Tailscale + SSH tunnels when it is on, and on the laptop otherwise; see
+  `docs/gpu-host.md`.
+
 ## Mandarin record shape
 
 A vocabulary entry should be able to hold simplified and traditional forms,

@@ -16,6 +16,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Iterator
 
+from .gpu_host import GPU
 from .jobs import connect, initialize, now
 
 DEFAULT_URL = "http://127.0.0.1:11434"
@@ -65,8 +66,12 @@ FORMAT_RULES = (
 )
 
 
-def ollama_url() -> str:
-    return os.environ.get("WATCH2LEARN_OLLAMA_URL", DEFAULT_URL).rstrip("/")
+def ollama_url(start: bool = True) -> str:
+    """An explicit URL, else Ollama on the GPU machine when usable, else this laptop."""
+    configured = os.environ.get("WATCH2LEARN_OLLAMA_URL", "").strip()
+    if configured:
+        return configured.rstrip("/")
+    return GPU.endpoint("ollama", start=start) or DEFAULT_URL
 
 
 def model_name() -> str:
@@ -75,7 +80,7 @@ def model_name() -> str:
 
 def model_ready() -> bool:
     try:
-        with urllib.request.urlopen(f"{ollama_url()}/api/tags", timeout=1.5) as response:
+        with urllib.request.urlopen(f"{ollama_url(start=False)}/api/tags", timeout=1.5) as response:
             models = json.load(response).get("models", [])
     except (OSError, ValueError, urllib.error.URLError):
         return False

@@ -34,3 +34,4 @@ data/tts-cache/
 *.part
 *.tmp
 data/access-token
+.gpu/

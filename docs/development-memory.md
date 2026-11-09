@@ -194,3 +194,17 @@ a defect that escaped a completed check, or a manual task repeated at least twic
   (voice picker), not by intelligibility scores alone.
 - Verification: `test_word_lesson_streams_vietnamese_sections_and_is_cached`,
   `test_pronunciation_tips_cover_tone_changes_and_hard_sounds`, voice picker preview.
+
+## 2026-11-09 — GPU worker: orphaned tunnel and lockfile pins
+
+- Evidence: a smoke-test script crashed while its SSH tunnel (`ssh -L … run.sh`) kept
+  running, so the GPU worker held VRAM with no owner. Installing the worker with the
+  laptop's exported lock failed twice (tokenizers, huggingface-hub pinned above what
+  transformers 4.57.6 — VieNeu's GPU path — accepts).
+- Root cause: `Popen` children outlive the parent; the laptop lock is resolved for a
+  different package set than the GPU worker needs.
+- Reusable rule: register tunnel shutdown with `atexit` and close idle tunnels; build
+  the worker environment from direct dependencies (+ PyTorch/transformers) and let the
+  resolver pick compatible transitive versions there.
+- Verification: after a script exits, `ss -ltnH` on the GPU machine shows no 8911/
+  11434 listener and VRAM returns to ~220 MiB; `pnpm gpu:install` completes.

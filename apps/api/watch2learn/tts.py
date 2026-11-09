@@ -57,15 +57,28 @@ def vieneu_graphs() -> Path | None:
     return None
 
 
+def on_cuda() -> bool:
+    return os.environ.get("WATCH2LEARN_DEVICE") == "cuda"  # set on the GPU worker
+
+
+def vieneu_torch_ready() -> bool:
+    root = voice_dir()
+    return (root / "vieneu-torch" / "update" / "model.safetensors").is_file() and (
+        root / "moss-torch" / "config.json"
+    ).is_file()
+
+
 def voices_ready() -> bool:
     root = voice_dir()
-    return (
-        vieneu_graphs() is not None
+    vietnamese = (
+        vieneu_torch_ready()
+        if on_cuda()
+        else vieneu_graphs() is not None
         and (root / "moss" / "moss_audio_tokenizer_decode_full.onnx").is_file()
-        and all(
-            (root / "kokoro" / name).is_file()
-            for name in ("model.onnx", "voices-v1.1-zh.bin", "config.json")
-        )
+    )
+    return vietnamese and all(
+        (root / "kokoro" / name).is_file()
+        for name in ("model.onnx", "voices-v1.1-zh.bin", "config.json")
     )
 
 
@@ -73,6 +86,13 @@ def voices_ready() -> bool:
 def vieneu():
     from vieneu import Vieneu
     from vieneu._v3_turbo_engine import onnx_runtime_lite
+
+    if on_cuda():  # the author's GPU path: PyTorch model + MOSS codec from pinned local copies
+        return Vieneu(
+            backbone_repo=str(voice_dir() / "vieneu-torch"),
+            moss_tokenizer=str(voice_dir() / "moss-torch"),
+            device="cuda",
+        )
 
     # The SDK does not forward `codec_dir`; point it at our pinned local copy so the
     # codec is not looked up in the Hugging Face cache (whose symlinked external
@@ -99,8 +119,10 @@ def kokoro():
     from misaki import zh
 
     root = voice_dir() / "kokoro"
+    options = onnxruntime.SessionOptions()
+    options.intra_op_num_threads = max(1, min(7, (os.cpu_count() or 2) - 1))
     session = onnxruntime.InferenceSession(
-        str(root / "model.onnx"), providers=["CPUExecutionProvider"]
+        str(root / "model.onnx"), options, providers=["CPUExecutionProvider"]
     )
     vocab = json.loads((root / "config.json").read_text(encoding="utf-8"))["vocab"]
     styles = dict(np.load(root / "voices-v1.1-zh.bin"))

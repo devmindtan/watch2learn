@@ -27,11 +27,13 @@ def load_model():
         raise RuntimeError("ASR model is missing; run pnpm setup:asr once before processing video")
     from faster_whisper import WhisperModel
 
+    cuda = os.environ.get("WATCH2LEARN_DEVICE") == "cuda"  # set on the GPU worker
     return WhisperModel(
         str(model_path()),
-        device="cpu",
-        compute_type="int8",
-        cpu_threads=max(1, min(8, os.cpu_count() or 1)),
+        device="cuda" if cuda else "cpu",
+        compute_type="float16" if cuda else "int8",
+        # leave at least one core free so the desktop stays responsive
+        cpu_threads=max(1, min(7, (os.cpu_count() or 2) - 1)),
         local_files_only=True,
     )
 

@@ -17,7 +17,7 @@ from typing import Annotated, Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from pypinyin.contrib.tone_convert import to_tone, to_tone3
@@ -27,6 +27,7 @@ from . import (
     jobs,
     learning,
     pronunciation,
+    remote_speech,
     security,
     storage,
     translation,
@@ -35,6 +36,7 @@ from . import (
 )
 from .asr import model_ready, transcribe_clip, transcribe_mandarin
 from .dictionary import load_cedict, load_vietnamese
+from .gpu_host import GPU
 from .lesson import (
     ANALYSIS_VERSION,
     add_vietnamese_definitions,
@@ -78,6 +80,7 @@ async def lifespan(_app: FastAPI):
         RUNNING_TASKS.add(task)
         task.add_done_callback(RUNNING_TASKS.discard)
     yield
+    await asyncio.to_thread(GPU.shutdown)
 
 
 app = FastAPI(title="Watch2Learn", version="0.4.0", lifespan=lifespan)
@@ -169,7 +172,8 @@ async def health(request: Request) -> dict:
         "translation_unit": translation.TRANSLATION_UNIT,
         "explain_model_ready": await asyncio.to_thread(explain.model_ready),
         "explain_model": explain.model_name(),
-        "tts_ready": tts.voices_ready(),
+        "tts_ready": tts.voices_ready() or GPU.status()["configured"],
+        "gpu": GPU.status(),
     }
 
 
@@ -210,10 +214,14 @@ def transcribe_media(source: Path, work_dir: Path, report: Report) -> dict:
     speech.unlink(missing_ok=True)  # a resumed job may have left a partial file
     audio_path = extract_asr_audio(source, speech)
     report("transcribing-mandarin", 40)
-    cues, transcript = transcribe_mandarin(
-        audio_path,
-        on_progress=lambda fraction: report("transcribing-mandarin", 40 + round(fraction * 45)),
-    )
+    remote = remote_speech.transcribe(audio_path)  # GPU machine when it is on
+    if remote:
+        cues, transcript = remote
+    else:
+        cues, transcript = transcribe_mandarin(
+            audio_path,
+            on_progress=lambda fraction: report("transcribing-mandarin", 40 + round(fraction * 45)),
+        )
     return {"transcript": transcript, **analyze_cues(cues, report)}
 
 
@@ -817,7 +825,10 @@ def check_pronunciation(recording: Path, work_dir: Path, target: str) -> dict:
         raise ValueError("Bản ghi quá ngắn — hãy giữ nút ghi âm lâu hơn một chút.")
     if duration > 30:
         raise ValueError("Bản ghi dài quá 30 giây.")
-    return pronunciation.score_pronunciation(target, transcribe_clip(speech))
+    heard = remote_speech.transcribe_clip(speech)
+    if heard is None:
+        heard = transcribe_clip(speech)
+    return pronunciation.score_pronunciation(target, heard)
 
 
 @app.post("/api/pronunciation")
@@ -985,8 +996,18 @@ def require_voices() -> None:
         )
 
 
+def voice_catalog() -> dict:
+    """Voices of the laptop's models, or of the GPU worker when the laptop has none."""
+    if tts.voices_ready():
+        return tts.available_voices()
+    remote = remote_speech.voices()
+    if remote:
+        return remote
+    require_voices()
+
+
 async def validated_voices(choice: VoiceChoice) -> dict:
-    available = await asyncio.to_thread(tts.available_voices)
+    available = await asyncio.to_thread(voice_catalog)
     chosen = {key: value for key, value in choice.model_dump().items() if value}
     for lang, voice in chosen.items():
         if voice not in {item["id"] for item in available[lang]}:
@@ -996,30 +1017,31 @@ async def validated_voices(choice: VoiceChoice) -> dict:
 
 @app.get("/api/voices")
 async def list_voices() -> dict:
-    require_voices()
     return {
-        "available": await asyncio.to_thread(tts.available_voices),
+        "available": await asyncio.to_thread(voice_catalog),
         "selected": selected_voices(),
     }
 
 
 @app.put("/api/voices")
 async def choose_voices(choice: VoiceChoice) -> dict:
-    require_voices()
     learning.set_preference("voices", selected_voices() | await validated_voices(choice))
     return {"selected": selected_voices()}
 
 
 @app.post("/api/tts")
-async def read_aloud(request: SpeechRequest) -> FileResponse:
-    """Read Chinese/Vietnamese parts aloud with local voices (cached AAC audio)."""
-    require_voices()
+async def read_aloud(request: SpeechRequest) -> Response:
+    """Read Chinese/Vietnamese parts aloud (GPU worker when on, else the laptop)."""
     parts = [part.model_dump() for part in request.parts]
     if sum(len(part["text"]) for part in parts) > tts.MAX_CHARACTERS:
         raise HTTPException(status_code=413, detail="Đoạn cần đọc quá dài")
     voices = selected_voices()
     if request.voices:
         voices |= await validated_voices(request.voices)
+    audio = await asyncio.to_thread(remote_speech.synthesize, parts, voices)
+    if audio:
+        return Response(audio, media_type="audio/mp4", headers={"Cache-Control": "private"})
+    require_voices()
     try:
         path = await asyncio.to_thread(tts.synthesize, parts, voices)
     except ValueError as error:
