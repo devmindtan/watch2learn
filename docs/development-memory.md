@@ -178,3 +178,19 @@ a defect that escaped a completed check, or a manual task repeated at least twic
   asserting that audio playback actually started.
 - Verification: `test_local_voices_read_mixed_chinese_and_vietnamese`; Playwright
   asserts `/api/tts` returns `audio/mp4` and an audio element starts playing.
+
+## 2026-11-09 — spoken explanation re-read the screen and the voice sounded odd
+
+- Evidence: the learner asked for a Vietnamese lesson in a fixed order — how the word
+  is read, its meaning, pronunciation pitfalls, where it is met in conversation, how
+  it is used — instead of reading the visible facts aloud; the model also produced
+  Chinese grammar terms and an invented pronunciation note ("手 như thou"). The
+  Piper voices were judged unnatural.
+- Root cause: the narration was built from the display lines, and pronunciation
+  advice was left to the model.
+- Reusable rule: narrate as a teacher in the learner's language; keep readings,
+  meanings and pronunciation hints deterministic (`learner_tips`) and let the model
+  write only usage/situation text, streamed per section. Choose voices by listening
+  (voice picker), not by intelligibility scores alone.
+- Verification: `test_word_lesson_streams_vietnamese_sections_and_is_cached`,
+  `test_pronunciation_tips_cover_tone_changes_and_hard_sounds`, voice picker preview.

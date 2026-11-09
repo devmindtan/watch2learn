@@ -4,6 +4,8 @@ Rows are filled from the lesson on the server (never from client-supplied text),
 every saved item keeps its original cue, translation, timestamp and lesson link.
 """
 
+import json
+
 from .jobs import connect, initialize, now
 
 STATUSES = ("saved", "learned")
@@ -259,3 +261,28 @@ def learner_state() -> dict:
         },
         "sentences": {row["sentence_id"]: row["status"] for row in list_sentences()},
     }
+
+
+def get_preference(key: str, default=None):
+    initialize_learning()
+    with connect() as connection:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS learner_preferences (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        row = connection.execute(
+            "SELECT value FROM learner_preferences WHERE key = ?", (key,)
+        ).fetchone()
+    return json.loads(row["value"]) if row else default
+
+
+def set_preference(key: str, value) -> None:
+    initialize_learning()
+    with connect() as connection:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS learner_preferences (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        connection.execute(
+            "INSERT INTO learner_preferences VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, json.dumps(value, ensure_ascii=False)),
+        )

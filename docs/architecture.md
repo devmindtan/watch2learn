@@ -118,15 +118,20 @@ that sentence; other readings stay available as `alternatives`.
   aligned so missing/extra syllables are penalised. It is an estimate: tones come
   from the recognised words, not from pitch analysis. Best/last scores are kept
   for saved items.
-- Explanations (word and sentence) show verified facts first — word, per-syllable
-  tone guide, CVDICT meaning, sense in this sentence, cue and translation; for a
-  sentence its word-by-word glossary — then AI notes from a local Ollama model
-  (`WATCH2LEARN_OLLAMA_MODEL`, default `qwen3:8b`): when/where a word is used, or a
-  sentence's structure and situation. AI text is labelled and cached per context.
-  Each panel can be read silently ("Xem") or aloud ("Nghe").
-- Reading aloud uses `POST /api/tts`: local Piper voices (Chinese from our context
-  pinyin, Vietnamese via espeak phonemes), cached as AAC in `data/tts-cache/`. The
-  browser's Web Speech voices are only a fallback when no voices are installed.
+- Spoken lessons are Vietnamese and follow a fixed teaching order. Word: how it is
+  read, what it means, what to watch when pronouncing it, where it is met in
+  conversation, how it is used in practice (+ examples). Sentence: how it is read,
+  meaning word by word, pronunciation notes, structure, when it is said (+
+  examples). The first three parts are built from verified data (context pinyin,
+  tones, CVDICT, `pronunciation.learner_tips` for Vietnamese speakers) and play at
+  once; the rest is written by the local Ollama model, streamed as NDJSON from
+  `POST /api/explain` section by section, cached, and labelled as AI. Chinese
+  grammar terms in the model's prose are replaced by Vietnamese ones.
+- Reading aloud uses `POST /api/tts`: VieNeu-TTS (Vietnamese) and Kokoro (Chinese)
+  on the backend, loudness-matched, cached per phrase (`data/tts-cache/parts`) and
+  per chunk; the browser splits narration into sentence chunks and plays each as
+  soon as it is ready. Voices are chosen in the UI and stored server-side
+  (`GET/PUT /api/voices`). Browser Web Speech voices are only a fallback.
 
 ## Mandarin record shape
 

@@ -21,9 +21,8 @@ transitive licenses before pinning a production version.
 | CTranslate2 + SentencePiece | local sentence-translation runtime | MIT / Apache-2.0 | CPU int8 inference; CTranslate2 already ships with faster-whisper |
 | Helsinki-NLP/opus-mt-zh-vi (CTranslate2 int8 conversion `manancode/opus-mt-zh-vi-ctranslate2-android`) | offline zh→vi sentence translation | Apache-2.0; about 83 MB | Explicit `pnpm setup:translation`; pinned revision + per-file SHA-256; optional — lessons still work without it |
 | Ollama + Qwen3 8B (`qwen3:8b`) | optional usage explanations in Vietnamese | Ollama MIT; Qwen3 weights Apache-2.0; ~5 GB, CPU ≈30–40 s per new explanation | Local only, cached; AI-labelled; dictionary meaning stays the source of truth |
-| Piper (`piper-tts` 1.8.0, OHF-Voice/piper1-gpl) | reading words, sentences and explanations aloud on the backend | GPL-3.0-or-later; used as an installed library, not vendored | Chrome on Linux has no Web Speech voices by default; Chinese is fed our own pinyin (skips the heavy `zh` extra/g2pW) |
-| Piper voice `zh_CN-chaowen-medium` | Chinese voice | dataset CC0; ~63 MB | Pinned revision + SHA-256 (`pnpm setup:voices`); ASR round-trip of synthesized sentences scores 100 % |
-| Piper voice `vi_VN-vais1000-medium` | Vietnamese voice | VAIS-1000 dataset CC BY 4.0 (credit VAIS); ~63 MB | Rejected alternatives: `huayan`/`25hours_single` (unknown license), `vivos` (non-commercial) |
+| VieNeu-TTS v3 Turbo (`vieneu` 3.8.3, pnnbao97) | Vietnamese narration of lessons; 25 preset voices | Apache-2.0 (model, SDK, sea-g2p); MOSS-Audio-Tokenizer-Nano codec Apache-2.0; pulls gradio/librosa as SDK deps | int8 ONNX on VNNI CPUs, fp32 otherwise (`pnpm setup:voices`); RTF ≈1 on the laptop CPU, so the GPU host is the intended runtime |
+| Kokoro-82M v1.1-zh (hexgrad) via kokoro-onnx release + `misaki[zh]` 0.9.4 | Chinese reading of words, sentences and examples; 10 curated voices | Apache-2.0 model, MIT ONNX export, Apache-2.0 misaki | ASR round-trip of synthesized sentences scores 100 %; replaced Piper (robotic, GPL) |
 | Playwright | browser verification | Apache-2.0 | Critical flows only |
 | FastAPI | local HTTP API | MIT | Serve the local lesson API and static client |
 | pypinyin | Mandarin readings | MIT | Context-aware phrase readings with generated fallback |

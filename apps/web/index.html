@@ -18,6 +18,7 @@
         <span aria-hidden="true">←</span> Thư viện
       </button>
       <p id="lesson-title" class="lesson-title" hidden></p>
+      <button id="voice-button" class="ghost-button voice-button" type="button" title="Chọn giọng đọc" hidden>🔊 <span class="voice-button-label">Giọng đọc</span></button>
       <button id="server-button" class="server-button" type="button" data-state="checking" title="Kết nối máy chủ">
         <span class="server-dot" aria-hidden="true"></span><span id="server-label">Đang kết nối…</span>
       </button>
@@ -245,6 +246,28 @@
         </aside>
       </section>
     </main>
+
+    <dialog id="voice-dialog" class="server-dialog" aria-labelledby="voice-title">
+      <form method="dialog">
+        <h2 id="voice-title">Giọng đọc</h2>
+        <p class="muted">Giọng chạy ngay trên máy chủ của bạn. Bấm “Nghe thử” để chọn giọng bạn thích.</p>
+        <label class="field">
+          <span>Giọng tiếng Việt (giảng bài)</span>
+          <select id="voice-vi"></select>
+        </label>
+        <button id="voice-vi-test" class="control-button" type="button">▶ Nghe thử giọng Việt</button>
+        <label class="field">
+          <span>Giọng tiếng Trung (đọc mẫu)</span>
+          <select id="voice-zh"></select>
+        </label>
+        <button id="voice-zh-test" class="control-button" type="button">▶ Nghe thử giọng Trung</button>
+        <p id="voice-status" class="server-status" role="status"></p>
+        <div class="dialog-actions">
+          <button class="control-button" value="cancel" formnovalidate>Đóng</button>
+          <button class="primary-button" value="save">Lưu giọng đọc</button>
+        </div>
+      </form>
+    </dialog>
 
     <dialog id="practice-dialog" class="practice-dialog" aria-label="Luyện phát âm">
       <form method="dialog" class="practice-close"><button class="close-button" aria-label="Đóng">×</button></form>

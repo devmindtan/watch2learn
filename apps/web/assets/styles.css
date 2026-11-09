@@ -386,3 +386,16 @@ main { width: min(1560px, 100%); margin: 0 auto; }
   .library-toolbar .segmented { min-width: 0; width: 100%; }
 }
 .cue-row.is-foreign .cue-text { font-family: inherit; font-size: 1rem; font-weight: 400; line-height: 1.6; color: var(--muted); }
+
+/* Spoken lessons and voice settings */
+.voice-button { order: 9; margin-left: auto; }
+.view-toggles:not([hidden]) ~ .voice-button { margin-left: 0; }
+.server-dialog select { min-height: 42px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface); font-weight: 400; }
+.lesson-sections { display: grid; gap: 10px; }
+.lesson-section h4 { margin: 0 0 4px; font-size: .86rem; color: var(--jade-dark); }
+.lesson-section p { margin: 2px 0; line-height: 1.55; }
+.lesson-zh { font: 600 1.1rem/1.6 var(--cjk); }
+.lesson-example { padding: 6px 10px; border-radius: 8px; background: var(--paper); }
+.lesson-example-zh { font: 600 1.02rem var(--cjk); }
+.lesson-example-pinyin { color: var(--jade); font-size: .85rem; }
+@media (max-width: 760px) { .voice-button-label { display: none; } }

@@ -19,7 +19,7 @@ Override the location with `WATCH2LEARN_TRANSLATION_MODEL=/absolute/path`.
 
 # Local voices
 
-Run `pnpm setup:voices` to download the Piper voices `zh_CN-chaowen-medium`
-(dataset CC0) and `vi_VN-vais1000-medium` (VAIS-1000, CC BY 4.0) into
-`data/models/piper/`, pinned to a revision and verified by SHA-256. They read
-words, sentences and explanations aloud in any browser.
+Run `pnpm setup:voices` to download VieNeu-TTS v3 Turbo graphs (Vietnamese; int8
+when the CPU has VNNI, fp32 otherwise), the MOSS audio codec decoder and Kokoro
+v1.1-zh (Chinese) into `data/models/voices/`, each pinned to a revision and verified
+by SHA-256 (all Apache-2.0; the Kokoro ONNX export is MIT).

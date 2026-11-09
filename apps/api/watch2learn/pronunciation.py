@@ -109,3 +109,95 @@ def score_pronunciation(target: str, heard_text: str) -> dict:
         "extra_syllables": extras,
         "method": "whisper-pinyin-comparison",
     }
+
+
+# Pronunciation hints for Vietnamese speakers, phrased to be read aloud (no pinyin
+# letters) and attached to the character they concern.
+INITIAL_TIPS = {
+    "b": "phụ âm đầu đọc gần “p” tiếng Việt, không bật hơi",
+    "p": "phụ âm đầu bật hơi mạnh, như đẩy một luồng hơi ra khỏi môi",
+    "d": "phụ âm đầu đọc gần “t” tiếng Việt, không bật hơi",
+    "t": "phụ âm đầu bật hơi, gần “th” tiếng Việt",
+    "g": "phụ âm đầu đọc gần “c” tiếng Việt, không bật hơi",
+    "k": "phụ âm đầu bật hơi mạnh, gần “kh” nhưng có hơi",
+    "h": "phụ âm đầu đọc gần “kh” tiếng Việt",
+    "f": "phụ âm đầu đọc gần “ph” tiếng Việt",
+    "j": "phụ âm đầu đọc gần “ch” tiếng Việt, mặt lưỡi áp lên vòm miệng, không bật hơi",
+    "q": "phụ âm đầu giống “ch” nhưng bật hơi mạnh",
+    "x": "phụ âm đầu đọc gần “x” tiếng Việt, môi dẹt như đang cười",
+    "zh": "phụ âm đầu uốn đầu lưỡi lên vòm miệng, gần “tr” tiếng Việt, không bật hơi",
+    "ch": "phụ âm đầu uốn lưỡi như “tr” nhưng bật hơi mạnh",
+    "sh": "phụ âm đầu uốn đầu lưỡi lên, gần “s” tiếng Việt đọc nặng",
+    "r": "phụ âm đầu uốn lưỡi, gần “r” nhẹ kéo dài, không rung lưỡi",
+    "z": "phụ âm đầu để đầu lưỡi thẳng chạm sau răng trên, gần “ch” nhẹ, không bật hơi",
+    "c": "phụ âm đầu để đầu lưỡi thẳng như “ts” và bật hơi mạnh",
+    "s": "phụ âm đầu đọc gần “x” tiếng Việt, đầu lưỡi thẳng",
+}
+FINAL_TIPS = {
+    "e": "vần đọc gần “ưa”, miệng hé",
+    "ian": "vần đọc gần “iên”",
+    "ong": "vần đọc gần “ung”",
+    "eng": "vần đọc gần “âng”",
+    "ui": "vần đọc gần “uây”",
+    "iu": "vần đọc gần “iêu”",
+    "un": "vần đọc gần “uân”",
+    "ou": "vần đọc gần “âu”",
+    "ei": "vần đọc gần “ây”",
+    "en": "vần đọc gần “ân”",
+    "uo": "vần đọc gần “ua”",
+    "ie": "vần đọc gần “iê”",
+    "er": "đọc là “ơ” có uốn lưỡi",
+    "v": "vần tròn môi như “u” nhưng lưỡi đặt như “i”",
+    "ve": "vần tròn môi như “u” rồi chuyển sang “ê”",
+    "van": "vần tròn môi như “u” rồi chuyển sang “iên”",
+    "vn": "vần tròn môi như “u” rồi chuyển sang “in”",
+}
+TONE_NAMES = {
+    "1": "thanh 1, giọng cao và đều",
+    "2": "thanh 2, giọng đi lên",
+    "3": "thanh 3, giọng hạ thấp rồi lên",
+    "4": "thanh 4, giọng rơi mạnh từ cao xuống",
+    "5": "thanh nhẹ, đọc ngắn và nhẹ",
+}
+APICAL_I = {"z", "c", "s"}
+RETROFLEX_I = {"zh", "ch", "sh", "r"}
+
+
+def learner_tips(syllables: list[tuple[str, str]]) -> list[str]:
+    """Spoken-style hints for (character, numbered syllable) pairs, tone changes first."""
+    tips: list[str] = []
+    tones = [split_syllable(syllable)[2] for _, syllable in syllables]
+    for index in range(len(tones) - 1):
+        if tones[index] == "3" and tones[index + 1] == "3":
+            pair = syllables[index][0] + syllables[index + 1][0]
+            tips.append(
+                f"{pair} có hai thanh 3 liền nhau, nên chữ {syllables[index][0]} "
+                "đọc thành thanh 2, giọng đi lên."
+            )
+    for index, (character, _syllable) in enumerate(syllables):
+        following = tones[index + 1] if index + 1 < len(tones) else None
+        if character == "不" and following == "4":
+            tips.append("不 đứng trước thanh 4 nên đọc thành thanh 2.")
+        if character == "一" and following:
+            tips.append(
+                "一 đổi thanh theo chữ đứng sau: trước thanh 4 đọc thanh 2, còn lại thanh 4."
+            )
+    seen = set()
+    for character, syllable in syllables:
+        initial, final, _tone = split_syllable(syllable)
+        if initial in {"j", "q", "x", "y"} and final.startswith("u"):
+            final = "v" + final[1:]
+        parts = []
+        if initial in INITIAL_TIPS:
+            parts.append(INITIAL_TIPS[initial])
+        if final == "i" and initial in APICAL_I:
+            parts.append("vần đọc gần “ư”, không đọc “i”")
+        elif final == "i" and initial in RETROFLEX_I:
+            parts.append("vần đọc gần “ư” có uốn lưỡi, không đọc “i”")
+        elif final in FINAL_TIPS:
+            parts.append(FINAL_TIPS[final])
+        tip = "; ".join(parts)
+        if tip and (initial, final) not in seen:
+            seen.add((initial, final))
+            tips.append(f"Chữ {character}: {tip}.")
+    return tips

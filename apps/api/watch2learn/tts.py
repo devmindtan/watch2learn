@@ -1,9 +1,8 @@
-"""Local text-to-speech with Piper voices, so audio works in every browser.
+"""Local text-to-speech: VieNeu-TTS v3 Turbo (Vietnamese) and Kokoro v1.1-zh (Chinese).
 
-Chrome on Linux exposes no speech voices by default, so the browser's Web Speech
-API cannot be relied on. Chinese is voiced from our own context-aware pinyin (the
-`chaowen` voice takes pinyin phonemes), which avoids Piper's heavy g2pW extra and
-keeps the spoken reading identical to the reading shown to the learner.
+Audio is produced on the backend because Chrome on Linux exposes no Web Speech
+voices. Both models run on CPU through ONNX Runtime; outputs are resampled to
+24 kHz, loudness-matched so the two voices sound alike in level, and cached as AAC.
 """
 
 import hashlib
@@ -11,115 +10,227 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 import wave
 from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 
-from .lesson import contextual_readings, to_simplified
 from .media import media_binary
-from .pronunciation import split_syllable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-VOICE_DIR = PROJECT_ROOT / "data" / "models" / "piper"
+VOICE_DIR = PROJECT_ROOT / "data" / "models" / "voices"
 CACHE_DIR = PROJECT_ROOT / "data" / "tts-cache"
-VOICES = {"zh": "zh_CN-chaowen-medium", "vi": "vi_VN-vais1000-medium"}
-SAMPLE_RATE = 22050
-PAUSE_SECONDS = 0.25
-GROUP_END = set("12345。？！.?!—…、，：；,:; ")
+SAMPLE_RATE = 24_000
+VIENEU_RATE = 48_000
+PAUSE_SECONDS = 0.3
+TARGET_RMS = 0.08
 MAX_PARTS = 60
 MAX_CHARACTERS = 3000
+DEFAULT_VOICES = {"vi": "Ngọc Huyền", "zh": "zf_001"}
+CHINESE_VOICES = [
+    ("zf_001", "Nữ 1"),
+    ("zf_002", "Nữ 2"),
+    ("zf_003", "Nữ 3"),
+    ("zf_004", "Nữ 4"),
+    ("zf_005", "Nữ 5"),
+    ("zm_009", "Nam 1"),
+    ("zm_010", "Nam 2"),
+    ("zm_011", "Nam 3"),
+    ("zm_012", "Nam 4"),
+    ("zm_013", "Nam 5"),
+]
+_VIENEU_LOCK = threading.Lock()
+_KOKORO_LOCK = threading.Lock()
 
 
 def voice_dir() -> Path:
     return Path(os.environ.get("WATCH2LEARN_VOICE_DIR", VOICE_DIR))
 
 
+def vieneu_graphs() -> Path | None:
+    for name in ("onnx_int8", "onnx_update"):
+        path = voice_dir() / "vieneu" / name
+        if (path / "config.json").is_file():
+            return path
+    return None
+
+
 def voices_ready() -> bool:
-    return all(
-        (voice_dir() / f"{name}{suffix}").is_file()
-        for name in VOICES.values()
-        for suffix in (".onnx", ".onnx.json")
+    root = voice_dir()
+    return (
+        vieneu_graphs() is not None
+        and (root / "moss" / "moss_audio_tokenizer_decode_full.onnx").is_file()
+        and all(
+            (root / "kokoro" / name).is_file()
+            for name in ("model.onnx", "voices-v1.1-zh.bin", "config.json")
+        )
     )
 
 
-@lru_cache(maxsize=2)
-def load_voice(lang: str):
-    from piper import PiperVoice
+@lru_cache(maxsize=1)
+def vieneu():
+    from vieneu import Vieneu
+    from vieneu._v3_turbo_engine import onnx_runtime_lite
 
-    return PiperVoice.load(str(voice_dir() / f"{VOICES[lang]}.onnx"))
+    # The SDK does not forward `codec_dir`; point it at our pinned local copy so the
+    # codec is not looked up in the Hugging Face cache (whose symlinked external
+    # data newer ONNX Runtime versions refuse to load).
+    codec_dir = str(voice_dir() / "moss")
+    original = onnx_runtime_lite.OnnxV3LiteEngine.__init__
 
+    def init(self, *args, **kwargs):
+        kwargs.setdefault("codec_dir", codec_dir)
+        original(self, *args, **kwargs)
 
-def chinese_phoneme_ids(voice, text: str) -> list[int]:
-    id_map = voice.config.phoneme_id_map
-    ids = list(id_map["^"])
-    simplified = to_simplified(text)
-    for character, reading in zip(simplified, contextual_readings(simplified), strict=True):
-        if reading:
-            initial, final, tone = split_syllable(reading)
-            phonemes = (initial or "Ø", final, tone)
-            if not all(phoneme in id_map for phoneme in phonemes):
-                continue
-            for phoneme in phonemes:
-                ids.extend(id_map[phoneme])
-                if phoneme in GROUP_END:
-                    ids.extend(id_map["_"])
-        elif character in id_map:
-            ids.extend(id_map[character] + id_map["_"])
-    return ids + list(id_map["$"])
+    onnx_runtime_lite.OnnxV3LiteEngine.__init__ = init
+    graphs = vieneu_graphs()
+    return Vieneu(
+        backbone_repo=str(voice_dir() / "vieneu"),
+        onnx_dir=str(graphs),
+        precision="int8" if graphs.name == "onnx_int8" else "fp32",
+    )
 
 
-def to_int16(audio: np.ndarray) -> np.ndarray:
-    peak = float(np.max(np.abs(audio))) if audio.size else 0.0
-    if peak < 1e-8:
-        return np.zeros(audio.shape, dtype=np.int16)
-    return (audio / peak * 32767 * 0.9).astype(np.int16)
+@lru_cache(maxsize=1)
+def kokoro():
+    import onnxruntime
+    from misaki import zh
+
+    root = voice_dir() / "kokoro"
+    session = onnxruntime.InferenceSession(
+        str(root / "model.onnx"), providers=["CPUExecutionProvider"]
+    )
+    vocab = json.loads((root / "config.json").read_text(encoding="utf-8"))["vocab"]
+    styles = dict(np.load(root / "voices-v1.1-zh.bin"))
+    return session, vocab, styles, zh.ZHG2P(version="1.1")
 
 
-def synthesize_part(text: str, lang: str, rate: float) -> np.ndarray:
-    from piper.config import SynthesisConfig
+def available_voices() -> dict:
+    with _VIENEU_LOCK:
+        vietnamese = [{"id": name, "label": label} for label, name in vieneu().list_preset_voices()]
+    chinese = [{"id": name, "label": label} for name, label in CHINESE_VOICES]
+    return {"vi": vietnamese, "zh": chinese}
 
-    voice = load_voice(lang)
-    config = SynthesisConfig(length_scale=1.0 / max(0.5, min(1.5, rate)))
+
+def loudness_matched(audio: np.ndarray) -> np.ndarray:
+    audio = np.asarray(audio, dtype=np.float32).reshape(-1)
+    rms = float(np.sqrt(np.mean(audio**2))) if audio.size else 0.0
+    if rms < 1e-6:
+        return audio
+    return np.clip(audio * (TARGET_RMS / rms), -0.98, 0.98)
+
+
+def speak_vietnamese(text: str, voice: str) -> np.ndarray:
+    import soxr
+
+    with _VIENEU_LOCK:
+        audio = vieneu().infer(text, voice=voice)
+    return soxr.resample(np.asarray(audio, dtype=np.float32), VIENEU_RATE, SAMPLE_RATE)
+
+
+def speak_chinese(text: str, voice: str, rate: float) -> np.ndarray:
+    session, vocab, styles, g2p = kokoro()
+    with _KOKORO_LOCK:
+        phonemes, _tokens = g2p(text)
+    ids = [vocab[symbol] for symbol in phonemes if symbol in vocab][:500]
+    if not ids:
+        return np.zeros(0, dtype=np.float32)
+    style = styles[voice][min(len(ids), len(styles[voice]) - 1)]
+    audio = session.run(
+        None,
+        {
+            "input_ids": np.array([[0, *ids, 0]], dtype=np.int64),
+            "style": np.asarray(style, dtype=np.float32).reshape(1, -1),
+            "speed": np.array([max(0.5, min(1.5, rate))], dtype=np.float32),
+        },
+    )[0]
+    return np.asarray(audio, dtype=np.float32).reshape(-1)
+
+
+def part_audio(part: dict, voices: dict) -> np.ndarray:
+    """One part's loudness-matched audio, cached on disk: fixed phrases (section
+    titles, tone descriptions, a word read slowly) recur across lessons."""
+    lang = part["lang"]
+    voice = voices[lang]
+    rate = round(float(part.get("rate", 1.0)), 2)
+    payload = json.dumps(["part-1", lang, voice, rate, part["text"]], ensure_ascii=False)
+    path = CACHE_DIR / "parts" / f"{hashlib.sha256(payload.encode()).hexdigest()}.npy"
+    if path.is_file():
+        return np.load(path)
     if lang == "zh":
-        ids = chinese_phoneme_ids(voice, text)
-        if len(ids) <= 2:
-            return np.zeros(0, dtype=np.int16)
-        return to_int16(voice.phoneme_ids_to_audio(ids, config))
-    chunks = [
-        np.frombuffer(chunk.audio_int16_bytes, dtype=np.int16)
-        for chunk in voice.synthesize(text, config)
-    ]
-    return np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.int16)
+        audio = speak_chinese(part["text"], voice, rate)
+    else:
+        audio = speak_vietnamese(part["text"], voice)
+    audio = loudness_matched(audio)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(path.stem + ".part.npy")
+    np.save(partial, audio)
+    os.replace(partial, path)
+    return audio
 
 
-def cache_key(parts: list[dict]) -> str:
-    payload = json.dumps([VOICES, parts], ensure_ascii=False, sort_keys=True)
+COMMON_PHRASES = [
+    "Từ này đọc thế nào.",
+    "Câu này đọc thế nào.",
+    "Từ này đọc là",
+    "Câu này đọc là",
+    "Đọc chậm lại:",
+    "Chữ",
+    "Nghĩa là gì.",
+    "Lưu ý khi phát âm.",
+    "Thường gặp ở đâu trong giao tiếp.",
+    "Sử dụng thực tế như thế nào.",
+    "Cấu trúc câu.",
+    "Thường nói khi nào, ở đâu.",
+    "Câu trong video là:",
+    "Ví dụ:",
+    "Từng từ trong câu:",
+    "thanh 1, giọng cao và đều.",
+    "thanh 2, giọng đi lên, gần giống dấu sắc.",
+    "thanh 3, giọng hạ thấp rồi lên, gần giống dấu hỏi.",
+    "thanh 4, giọng rơi mạnh từ cao xuống.",
+    "thanh nhẹ, đọc ngắn và nhẹ.",
+]
+
+
+def warm_up(voices: dict) -> None:
+    """Load both models and pre-read the fixed lesson phrases (run in background)."""
+    voices = DEFAULT_VOICES | voices
+    for phrase in COMMON_PHRASES:
+        part_audio({"text": phrase, "lang": "vi", "rate": 1.0}, voices)
+    part_audio({"text": "你好", "lang": "zh", "rate": 0.8}, voices)
+
+
+def cache_key(parts: list[dict], voices: dict) -> str:
+    payload = json.dumps(["vieneu-kokoro-1", voices, parts], ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def synthesize(parts: list[dict]) -> Path:
-    """Speak parts [{text, lang: zh|vi, rate}] in order → cached AAC (.m4a) file."""
+def synthesize(parts: list[dict], voices: dict | None = None) -> Path:
+    """Speak parts [{text, lang: zh|vi, rate}] in order with the chosen voices → .m4a."""
+    voices = DEFAULT_VOICES | (voices or {})
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    target = CACHE_DIR / f"{cache_key(parts)}.m4a"
+    target = CACHE_DIR / f"{cache_key(parts, voices)}.m4a"
     if target.is_file():
         return target
-    pause = np.zeros(int(SAMPLE_RATE * PAUSE_SECONDS), dtype=np.int16)
+    pause = np.zeros(int(SAMPLE_RATE * PAUSE_SECONDS), dtype=np.float32)
     pieces = []
     for part in parts:
-        audio = synthesize_part(part["text"], part["lang"], part.get("rate", 1.0))
+        audio = part_audio(part, voices)
         if audio.size:
             pieces.extend([audio, pause])
     if not pieces:
         raise ValueError("Nothing to read aloud")
+    samples = (np.concatenate(pieces) * 32767).astype(np.int16)
     with tempfile.TemporaryDirectory(dir=CACHE_DIR) as work:
         wav_path = Path(work) / "speech.wav"
         with wave.open(str(wav_path), "wb") as output:
             output.setnchannels(1)
             output.setsampwidth(2)
             output.setframerate(SAMPLE_RATE)
-            output.writeframes(np.concatenate(pieces).tobytes())
+            output.writeframes(samples.tobytes())
         partial = Path(work) / "speech.m4a"
         subprocess.run(
             [

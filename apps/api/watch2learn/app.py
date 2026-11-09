@@ -2,13 +2,14 @@
 
 import asyncio
 import hashlib
+import json
 import logging
 import mimetypes
 import re
 import shutil
 import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from threading import Lock
@@ -16,9 +17,10 @@ from typing import Annotated, Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from pypinyin.contrib.tone_convert import to_tone, to_tone3
 
 from . import (
     explain,
@@ -71,9 +73,10 @@ def no_report(_stage: str, _progress: int) -> None:
 async def lifespan(_app: FastAPI):
     resume_pending_jobs()
     cleanup_abandoned_job_files()
-    task = asyncio.create_task(asyncio.to_thread(upgrade_saved_lessons))
-    RUNNING_TASKS.add(task)
-    task.add_done_callback(RUNNING_TASKS.discard)
+    for background in (upgrade_saved_lessons, warm_up_voices):
+        task = asyncio.create_task(asyncio.to_thread(background))
+        RUNNING_TASKS.add(task)
+        task.add_done_callback(RUNNING_TASKS.discard)
     yield
 
 
@@ -638,6 +641,15 @@ def ensure_current_analysis(lesson_id: str) -> dict | None:
         return lesson
 
 
+def warm_up_voices() -> None:
+    if not tts.voices_ready():
+        return
+    try:
+        tts.warm_up(learning.get_preference("voices") or {})
+    except Exception as error:  # a failed warm-up only costs latency later
+        logger.warning("Voice warm-up failed: %s", error)
+
+
 def upgrade_saved_lessons() -> None:
     """At startup, bring every saved lesson to the current analysis and translation
     rules in the background so opening a lesson never waits for it."""
@@ -866,39 +878,84 @@ def sentence_words(lesson: dict, cue: dict) -> list[dict]:
     return glossary
 
 
-@app.post("/api/explain")
-async def explain_word(request: ExplainRequest) -> dict:
-    """AI (local Ollama) explanation of a word in context, or of a whole sentence."""
-    lesson = completed_lesson(request.lesson_id)
-    if not request.word_id:
-        if not request.cue_id:
-            raise HTTPException(status_code=422, detail="word_id or cue_id is required")
-        cue = find_cue(lesson, request.cue_id)
-        try:
-            return await asyncio.to_thread(
-                explain.explain_sentence,
-                cue["text"],
-                cue.get("translation_vi"),
-                sentence_words(lesson, cue),
-            ) | {"words": sentence_words(lesson, cue)}
-        except (OSError, KeyError, ValueError, RuntimeError) as error:
-            raise HTTPException(
-                status_code=503,
-                detail=f"Chưa dùng được AI local ({explain.model_name()} qua Ollama): {error}",
-            ) from error
-    word = next((item for item in lesson["vocabulary"] if item["id"] == request.word_id), None)
-    if not word:
-        raise HTTPException(status_code=404, detail="Word was not found in this lesson")
-    fields = learning.word_fields(lesson, request.word_id, request.cue_id)
+def pronunciation_facts(text: str, marked_pinyin: str | None = None) -> dict:
+    """Readings (as shown to the learner when given), tones and hints for Vietnamese speakers."""
+    pairs = pronunciation.han_syllables(text)
+    marked = (marked_pinyin or "").split()
+    if marked and len(marked) == len(pairs):
+        pairs = [
+            (character, to_tone3(syllable, neutral_tone_with_five=True))
+            for (character, _), syllable in zip(pairs, marked, strict=True)
+        ]
+    syllables = [
+        {
+            "character": character,
+            "pinyin": to_tone(syllable),
+            "tone": int(syllable[-1]) if syllable[-1:].isdigit() else 5,
+        }
+        for character, syllable in pairs
+    ]
+    return {"syllables": syllables, "tips": pronunciation.learner_tips(pairs)}
+
+
+def explanation_events(facts: dict, lesson_events) -> Iterator[bytes]:
+    """NDJSON: facts first, then each section/example as the model finishes it."""
+
+    def line(event: dict) -> bytes:
+        return (json.dumps(event, ensure_ascii=False) + "\n").encode()
+
+    yield line({"type": "facts", "facts": facts, "model": explain.model_name()})
+    cached = False
     try:
-        return await asyncio.to_thread(
-            explain.explain_word, word, fields["sentence"] or "", fields["sentence_translation"]
-        )
+        for event in lesson_events:
+            cached = cached or bool(event.get("cached"))
+            if "example" in event:
+                example = event["example"]
+                pinyin = " ".join(
+                    to_tone(syllable) for _, syllable in pronunciation.han_syllables(example["zh"])
+                )
+                yield line({"type": "example", **example, "pinyin": pinyin})
+            else:
+                yield line({"type": "section", "key": event["key"], "text": event["text"]})
     except (OSError, KeyError, ValueError, RuntimeError) as error:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Chưa dùng được AI local ({explain.model_name()} qua Ollama): {error}",
-        ) from error
+        logger.warning("Explanation failed: %s", error)
+        message = f"Chưa dùng được AI local ({explain.model_name()} qua Ollama): {error}"
+        yield line({"type": "error", "message": message})
+    yield line({"type": "done", "cached": cached})
+
+
+@app.post("/api/explain")
+async def explain_text(request: ExplainRequest) -> StreamingResponse:
+    """Vietnamese lesson about a word in context, or a whole sentence (local Ollama)."""
+    lesson = completed_lesson(request.lesson_id)
+    if request.word_id:
+        word = next((item for item in lesson["vocabulary"] if item["id"] == request.word_id), None)
+        if not word:
+            raise HTTPException(status_code=404, detail="Word was not found in this lesson")
+        fields = learning.word_fields(lesson, request.word_id, request.cue_id)
+        occurrence = next(
+            (item for item in word["occurrences"] if item["cue_id"] == fields["cue_id"]),
+            word["occurrences"][0],
+        )
+        facts = pronunciation_facts(occurrence["surface"], occurrence.get("pinyin"))
+        events = explain.word_lesson(
+            word, facts, fields["sentence"] or "", fields["sentence_translation"]
+        )
+    elif request.cue_id:
+        cue = find_cue(lesson, request.cue_id)
+        pinyin = " ".join(item["pinyin"] for item in cue["segments"] if item.get("pinyin"))
+        facts = pronunciation_facts(cue["text"], pinyin)
+        facts["tips"] = facts["tips"][:6]
+        events = explain.sentence_lesson(
+            cue["text"], cue.get("translation_vi"), sentence_words(lesson, cue), facts
+        )
+    else:
+        raise HTTPException(status_code=422, detail="word_id or cue_id is required")
+    return StreamingResponse(
+        explanation_events(facts, events),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 class SpeechPart(BaseModel):
@@ -907,25 +964,68 @@ class SpeechPart(BaseModel):
     rate: float = Field(default=1.0, ge=0.5, le=1.5)
 
 
+class VoiceChoice(BaseModel):
+    vi: str | None = Field(default=None, max_length=80)
+    zh: str | None = Field(default=None, max_length=40)
+
+
 class SpeechRequest(BaseModel):
     parts: list[SpeechPart] = Field(min_length=1, max_length=tts.MAX_PARTS)
+    voices: VoiceChoice | None = None  # preview a voice without saving it
 
 
-@app.post("/api/tts")
-async def read_aloud(request: SpeechRequest) -> FileResponse:
-    """Read Chinese/Vietnamese parts aloud with local Piper voices (cached AAC audio)."""
+def selected_voices() -> dict:
+    return tts.DEFAULT_VOICES | (learning.get_preference("voices") or {})
+
+
+def require_voices() -> None:
     if not tts.voices_ready():
         raise HTTPException(
             status_code=503, detail="Chưa cài giọng đọc trên máy chủ. Chạy pnpm setup:voices."
         )
+
+
+async def validated_voices(choice: VoiceChoice) -> dict:
+    available = await asyncio.to_thread(tts.available_voices)
+    chosen = {key: value for key, value in choice.model_dump().items() if value}
+    for lang, voice in chosen.items():
+        if voice not in {item["id"] for item in available[lang]}:
+            raise HTTPException(status_code=422, detail=f"Không có giọng “{voice}”")
+    return chosen
+
+
+@app.get("/api/voices")
+async def list_voices() -> dict:
+    require_voices()
+    return {
+        "available": await asyncio.to_thread(tts.available_voices),
+        "selected": selected_voices(),
+    }
+
+
+@app.put("/api/voices")
+async def choose_voices(choice: VoiceChoice) -> dict:
+    require_voices()
+    learning.set_preference("voices", selected_voices() | await validated_voices(choice))
+    return {"selected": selected_voices()}
+
+
+@app.post("/api/tts")
+async def read_aloud(request: SpeechRequest) -> FileResponse:
+    """Read Chinese/Vietnamese parts aloud with local voices (cached AAC audio)."""
+    require_voices()
     parts = [part.model_dump() for part in request.parts]
     if sum(len(part["text"]) for part in parts) > tts.MAX_CHARACTERS:
         raise HTTPException(status_code=413, detail="Đoạn cần đọc quá dài")
+    voices = selected_voices()
+    if request.voices:
+        voices |= await validated_voices(request.voices)
     try:
-        path = await asyncio.to_thread(tts.synthesize, parts)
+        path = await asyncio.to_thread(tts.synthesize, parts, voices)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+    except (OSError, RuntimeError, KeyError, subprocess.SubprocessError) as error:
+        logger.warning("Speech synthesis failed: %s", error)
         raise HTTPException(status_code=503, detail="Không tạo được giọng đọc") from error
     headers = {"Cache-Control": "private, max-age=86400"}
     return FileResponse(path, media_type="audio/mp4", headers=headers)

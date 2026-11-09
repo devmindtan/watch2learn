@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -70,43 +71,97 @@ def test_recording_endpoint_scores_and_records_progress(monkeypatch, tmp_path):
     assert not list((tmp_path / "jobs").iterdir())
 
 
-def test_explanations_are_generated_once_per_context(monkeypatch, tmp_path):
-    lesson_id = make_lesson(monkeypatch, tmp_path)
-    calls = []
-
-    def fake_ollama(prompt):
-        calls.append(prompt)
-        return "<think></think>**Trong câu này** 学习 nghĩa là học.\n- Dùng ở trường học."
-
-    monkeypatch.setattr(explain, "ask_ollama", fake_ollama)
-
+def read_events(body: dict) -> list[dict]:
     async def scenario():
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            body = {"lesson_id": lesson_id, "word_id": vocabulary_id("学习"), "cue_id": "cue-2"}
-            first = (await client.post("/api/explain", json=body)).json()
-            second = (await client.post("/api/explain", json=body)).json()
-            return first, second
+            response = await client.post("/api/explain", json=body)
+            assert response.headers["content-type"].startswith("application/x-ndjson")
+            return [json.loads(line) for line in response.text.splitlines() if line]
 
-    first, second = asyncio.run(scenario())
-    assert first["text"] == "Trong câu này 学习 nghĩa là học. Dùng ở trường học."
-    assert first["cached"] is False and second["cached"] is True
-    assert len(calls) == 1 and "今天学习中文。" in calls[0]
+    return asyncio.run(scenario())
 
 
-def test_sentence_explanations_include_the_word_glossary(monkeypatch, tmp_path):
+WORD_REPLY = (
+    "<giao_tiep>Hay gặp ở trường, 动词 dùng trang trọng vừa phải.</giao_tiep>\n"
+    "<su_dung>Thường đi với 中文 (tiếng Trung).</su_dung>\n"
+    "<vi_du>我们一起学习。 | Chúng ta cùng học.</vi_du>\n<vi_du>không có chữ Hán | x</vi_du>"
+)
+
+
+def test_word_lesson_streams_vietnamese_sections_and_is_cached(monkeypatch, tmp_path):
     lesson_id = make_lesson(monkeypatch, tmp_path)
     prompts = []
-    reply = "Câu này dùng mẫu 今天 + động từ."
-    monkeypatch.setattr(explain, "ask_ollama", lambda prompt: prompts.append(prompt) or reply)
 
-    async def scenario():
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-            body = {"lesson_id": lesson_id, "cue_id": "cue-2"}
-            return (await client.post("/api/explain", json=body)).json()
+    def fake_stream(prompt):
+        prompts.append(prompt)
+        for start in range(0, len(WORD_REPLY), 7):  # tags arrive split across chunks
+            yield WORD_REPLY[start : start + 7]
 
-    result = asyncio.run(scenario())
-    assert result["text"] == "Câu này dùng mẫu 今天 + động từ."
-    assert {"word": "学习", "pinyin": "xué xí", "meaning": "học"} in result["words"]
-    assert "学习 = học" in prompts[0] and "今天学习中文。" in prompts[0]
+    monkeypatch.setattr(explain, "stream_ollama", fake_stream)
+    body = {"lesson_id": lesson_id, "word_id": vocabulary_id("学习"), "cue_id": "cue-2"}
+    events = read_events(body)
+
+    assert events[0]["type"] == "facts"
+    assert events[0]["facts"]["syllables"] == [
+        {"character": "学", "pinyin": "xué", "tone": 2},
+        {"character": "习", "pinyin": "xí", "tone": 2},
+    ]
+    sections = {event["key"]: event["text"] for event in events if event["type"] == "section"}
+    assert list(sections) == ["giao_tiep", "su_dung"]
+    assert sections["giao_tiep"] == "Hay gặp ở trường, động từ dùng trang trọng vừa phải."
+    examples = [event for event in events if event["type"] == "example"]
+    assert examples == [
+        {
+            "type": "example",
+            "zh": "我们一起学习。",
+            "vi": "Chúng ta cùng học.",
+            "pinyin": "wǒ men yì qǐ xué xí",
+        }
+    ]
+    assert events[-1] == {"type": "done", "cached": False}
+    assert "gần “x” tiếng Việt" in prompts[0] and "今天学习中文。" in prompts[0]
+    assert events[0]["facts"]["tips"][0].startswith("Chữ 学:")
+
+    again = read_events(body)
+    assert len(prompts) == 1 and again[-1] == {"type": "done", "cached": True}
+    assert [event.get("text") for event in again[1:-1]] == [
+        event.get("text") for event in events[1:-1]
+    ]
+
+
+def test_sentence_lesson_and_offline_fallback(monkeypatch, tmp_path):
+    lesson_id = make_lesson(monkeypatch, tmp_path)
+    prompts = []
+
+    def fake_stream(prompt):
+        prompts.append(prompt)
+        yield "<giao_tiep>Nói khi kể lịch học.</giao_tiep><cau_truc>Thời gian đứng trước động từ."
+        yield "</cau_truc><vi_du>明天学习。 | Ngày mai học.</vi_du>"
+
+    monkeypatch.setattr(explain, "stream_ollama", fake_stream)
+    events = read_events({"lesson_id": lesson_id, "cue_id": "cue-2"})
+    assert {"type": "section", "key": "cau_truc", "text": "Thời gian đứng trước động từ."} in events
+    assert "学习 = học" in prompts[0]
+    assert [item["character"] for item in events[0]["facts"]["syllables"]][:2] == ["今", "天"]
+
+    def offline(prompt):
+        raise OSError("connection refused")
+        yield ""
+
+    monkeypatch.setattr(explain, "stream_ollama", offline)
+    fallback = read_events({"lesson_id": lesson_id, "cue_id": "cue-1"})
+    assert fallback[0]["facts"]["syllables"][0]["character"] == "你"
+    assert fallback[1]["type"] == "error" and "Ollama" in fallback[1]["message"]
+
+
+def test_pronunciation_tips_cover_tone_changes_and_hard_sounds():
+    tips = pronunciation.learner_tips(pronunciation.han_syllables("你好"))
+    assert tips[0].startswith("你好 có hai thanh 3 liền nhau")
+    shi = pronunciation.learner_tips(pronunciation.han_syllables("老师"))
+    assert shi == [
+        "Chữ 师: phụ âm đầu uốn đầu lưỡi lên, gần “s” tiếng Việt đọc nặng; "
+        "vần đọc gần “ư” có uốn lưỡi, không đọc “i”."
+    ]
+    bushi = pronunciation.learner_tips([("不", "bu2"), ("是", "shi4")])
+    assert any("不 đứng trước thanh 4" in tip for tip in bushi)
