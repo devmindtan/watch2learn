@@ -285,6 +285,17 @@
       <div id="practice-body"></div>
     </dialog>
 
+    <script>
+      // If the app fails while loading (e.g. an outdated cached file), say so instead of
+      // staying on "Đang kết nối…" forever.
+      window.addEventListener("error", () => {
+        const label = document.getElementById("server-label");
+        if (label && !document.body.dataset.ready) {
+          label.textContent = "Lỗi tải trang — nhấn Ctrl+Shift+R";
+          document.getElementById("server-button").dataset.state = "offline";
+        }
+      });
+    </script>
     <script type="module" src="assets/app.js"></script>
   </body>
 </html>

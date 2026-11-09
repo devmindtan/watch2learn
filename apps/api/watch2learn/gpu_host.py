@@ -138,6 +138,10 @@ class GpuHost:
     def endpoint(self, service_id: str, start: bool = True) -> str | None:
         """Base URL of the GPU service on a local port, or None to use the laptop."""
         service = SERVICES[service_id]
+        if not start:  # health checks: never wait behind a tunnel being opened
+            tunnel = self.tunnels.get(service_id)
+            alive = tunnel and tunnel.poll() is None and healthy(service)
+            return service.url if alive else None
         with self.lock:
             tunnel = self.tunnels.get(service_id)
             if tunnel and tunnel.poll() is None and healthy(service):

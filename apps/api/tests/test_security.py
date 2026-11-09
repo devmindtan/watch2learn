@@ -74,3 +74,12 @@ def test_public_page_preflight_allows_private_network(monkeypatch):
     assert response.status_code == 200
     assert response.headers["access-control-allow-private-network"] == "true"
     assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_ui_files_are_always_revalidated(monkeypatch, tmp_path):
+    monkeypatch.delenv("WATCH2LEARN_ACCESS_TOKEN", raising=False)
+    monkeypatch.setattr(security, "TOKEN_FILE", tmp_path / "missing")
+    for path in ("/", "/assets/app.js", "/assets/styles.css"):
+        response = asyncio.run(call("GET", path))
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-cache"

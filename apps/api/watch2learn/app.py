@@ -95,7 +95,13 @@ async def require_access_token(request: Request, call_next):
         return JSONResponse(
             {"detail": "Cần mã truy cập hợp lệ để dùng máy chủ này."}, status_code=401
         )
-    return await call_next(request)
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.startswith("/assets/"):
+        # Revalidate the UI on every load (cheap with ETag): a browser must never mix
+        # a cached old app.js with a new index.html after an update.
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 app.add_middleware(

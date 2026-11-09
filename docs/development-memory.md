@@ -223,3 +223,17 @@ a defect that escaped a completed check, or a manual task repeated at least twic
 - Verification: Playwright opens a saved word from the library and gets the same
   action set as on the video screen; no console errors; no horizontal scroll at
   390 px.
+
+## 2026-11-09 — UI stuck on "Đang kết nối…" after an update
+
+- Evidence: after the study-card refactor the learner's page stayed on the initial
+  "Đang kết nối…" label with the old library layout, while `/api/health` answered
+  in 1.8 s. Static files had no `Cache-Control`, so Chrome reused a cached
+  `app.js` (still binding `#save-cue`) with the new `index.html` (without it); the
+  module threw at load and never updated the label.
+- Root cause: heuristic browser caching of unversioned UI files.
+- Reusable rule: serve `/` and `/assets/*` with `Cache-Control: no-cache` (ETag
+  revalidation); give the health check a timeout and show a visible message when
+  the app fails to load. Health checks must not wait on GPU tunnel locks.
+- Verification: `test_ui_files_are_always_revalidated`; Playwright on port 8000
+  shows "Máy này" with no page errors.

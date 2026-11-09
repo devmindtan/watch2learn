@@ -449,7 +449,7 @@ function openServerDialog(message = "") {
 
 async function checkServer() {
   try {
-    const health = await responseJson(await apiFetch("/api/health"));
+    const health = await responseJson(await apiFetch("/api/health", { signal: AbortSignal.timeout(10000) }));
     if (health.auth_required && !health.authorized) {
       setServerState("auth", "Cần mã truy cập");
       return { health: null, message: "Máy chủ yêu cầu mã truy cập (chạy pnpm remote:token trên máy chủ để xem)." };
@@ -1190,4 +1190,5 @@ async function startApp() {
 }
 
 initLibrary({ openLesson: (id, focus) => openSavedLesson(id, focus) });
+document.body.dataset.ready = "1";
 loadHealth().then(() => state.health && startApp());
