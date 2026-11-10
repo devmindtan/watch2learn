@@ -24,6 +24,7 @@ from pypinyin.contrib.tone_convert import to_tone, to_tone3
 from . import pronunciation, word_dictionary
 from .gpu_host import GPU
 from .jobs import connect, initialize, now
+from .mandarin_text import chinese_text
 
 DEFAULT_URL = "http://127.0.0.1:11434"
 DEFAULT_MODEL = "qwen3:8b"
@@ -337,7 +338,7 @@ def sentence_words(lesson: dict, cue: dict) -> list[dict]:
 
 def sentence_facts(cue: dict) -> dict:
     pinyin = " ".join(item["pinyin"] for item in cue.get("segments", []) if item.get("pinyin"))
-    facts = pronunciation_facts(cue["text"], pinyin)
+    facts = pronunciation_facts(chinese_text(cue["text"]) or cue["text"], pinyin)
     facts["tips"] = facts["tips"][:6]
     return facts
 
@@ -349,10 +350,11 @@ def word_request(word: dict) -> LessonRequest:
 
 
 def sentence_request(lesson: dict, cue: dict) -> LessonRequest:
+    text = chinese_text(cue["text"]) or cue["text"]  # never teach the other-language parts
     prompt = sentence_prompt(
-        cue["text"], cue.get("translation_vi"), sentence_words(lesson, cue), sentence_facts(cue)
+        text, cue.get("translation_vi"), sentence_words(lesson, cue), sentence_facts(cue)
     )
-    return LessonRequest(prompt, SENTENCE_SECTIONS, f"sentence:{cue['text']}")
+    return LessonRequest(prompt, SENTENCE_SECTIONS, f"sentence:{text}")
 
 
 def lesson_requests(lesson: dict) -> list[LessonRequest]:
@@ -361,9 +363,10 @@ def lesson_requests(lesson: dict) -> list[LessonRequest]:
     requests = [word_request(word) for word in words]
     seen = set()
     for cue in lesson.get("cues", []):
-        if cue.get("translation_skipped") or not HAN.search(cue["text"]) or cue["text"] in seen:
+        text = chinese_text(cue["text"])
+        if cue.get("translation_skipped") or not text or text in seen:
             continue
-        seen.add(cue["text"])
+        seen.add(text)
         requests.append(sentence_request(lesson, cue))
     return requests
 

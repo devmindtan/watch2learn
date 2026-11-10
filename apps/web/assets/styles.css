@@ -497,3 +497,5 @@ main { width: 100%; }
 }
 .dictionary-summary { margin: 0; font-size: .86rem; }
 .library-study .library-item:not([tabindex]) { opacity: .7; }
+/* Non-Chinese words inside a Chinese line: plain, muted, not clickable. */
+.foreign-text { font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: .82em; font-weight: 400; color: var(--muted); }

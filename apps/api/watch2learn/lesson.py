@@ -10,12 +10,13 @@ from pypinyin import Style, lazy_pinyin, pinyin
 from pypinyin.contrib.tone_convert import to_tone
 
 from .dictionary import Cedict, DictionaryEntry
+from .mandarin_text import LATIN_WORD_RE, chinese_spans
 from .subtitles import Cue
 
 CJK_RE = re.compile(r"[㐀-䶿一-鿿豈-﫿]")
 TONE_RE = re.compile(r"[1-5]")
 MAX_ALTERNATIVE_READINGS = 4
-ANALYSIS_VERSION = "zh-v3"
+ANALYSIS_VERSION = "zh-v4"
 _TO_SIMPLIFIED = OpenCC("t2s")
 
 
@@ -133,24 +134,34 @@ def dictionary_provenance(dictionary: Cedict | None, name: str) -> dict:
 
 
 def cue_tokens(cue: Cue) -> list[dict]:
+    """Words of the Chinese parts; other-language parts stay as plain foreign text."""
     readings = contextual_readings(cue.text)
     tokens = []
-    cursor = 0
-    for word, start, end in jieba.tokenize(cue.text):
-        if start > cursor:
-            tokens.append({"text": cue.text[cursor:start]})
-        token = {"text": word}
-        if CJK_RE.search(word):
-            token |= {
-                "vocabulary_id": vocabulary_id(word),
-                "start_offset": start,
-                "end_offset": end,
-                "reading": " ".join(filter(None, readings[start:end])),
-            }
-        tokens.append(token)
-        cursor = end
-    if cursor < len(cue.text):
-        tokens.append({"text": cue.text[cursor:]})
+    for span_start, span_end, chinese in chinese_spans(cue.text):
+        part = cue.text[span_start:span_end]
+        if not chinese:
+            token = {"text": part}
+            if LATIN_WORD_RE.search(part):
+                token["foreign"] = True  # never learnt, read or translated
+            tokens.append(token)
+            continue
+        cursor = 0
+        for word, start, end in jieba.tokenize(part):
+            if start > cursor:
+                tokens.append({"text": part[cursor:start]})
+            token = {"text": word}
+            if CJK_RE.search(word):
+                begin, finish = span_start + start, span_start + end
+                token |= {
+                    "vocabulary_id": vocabulary_id(word),
+                    "start_offset": begin,
+                    "end_offset": finish,
+                    "reading": " ".join(filter(None, readings[begin:finish])),
+                }
+            tokens.append(token)
+            cursor = end
+        if cursor < len(part):
+            tokens.append({"text": part[cursor:]})
     return tokens
 
 

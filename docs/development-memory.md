@@ -266,3 +266,18 @@ a defect that escaped a completed check, or a manual task repeated at least twic
   as an explicit table with an API and a screen, not only an internal cache.
 - Verification: `test_preparation_writes_every_lesson_once` checks entries,
   sources, search and reuse; Playwright opens the "Từ điển" tab and a word.
+
+## 2026-11-10 — Vietnamese inside Chinese lines was learnt and translated
+
+- Evidence: in a lesson for Vietnamese learners, ASR lines like "Tôi đến đây,我来了,
+  我先走。" were kept whole (6 Han vs 3 Latin words passed the "mostly Chinese"
+  ratio), so the Vietnamese went into translation; "tận 一下" (misheard speech)
+  became vocabulary.
+- Root cause: the Chinese filter judged the whole cue, not each clause.
+- Reusable rule: decide language per clause (`mandarin_text.chinese_spans`); a
+  clause with Vietnamese/pinyin letters is foreign as a whole. Translation,
+  segmentation, sentence lessons, reading aloud and practice all use only the
+  Chinese spans; foreign spans are shown muted and never learnt.
+- Verification: `test_only_chinese_is_sent_for_translation` and
+  `test_mixed_line_only_learns_the_chinese_clauses` use the screenshot lines;
+  saved lessons re-analysed to zh-v4 / zh-clause-v4 show the same on port 8000.

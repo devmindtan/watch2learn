@@ -98,6 +98,12 @@ def test_only_chinese_is_sent_for_translation(monkeypatch):
     assert translation.chinese_source("Xin chào các bạn") == ""
     assert translation.chinese_source("我喜欢iPhone。") == "我喜欢iPhone。"
     assert translation.chinese_source("Daily routine in Chinese 日常生活") == "日常生活"
+    # Vietnamese teaching mixed into one line (screenshot of a real lesson).
+    assert translation.chinese_source("Tôi đến đây,我来了,我先走。") == "我来了,我先走。"
+    assert translation.chinese_source("Tôi đi trước nhé, 我先走, tận 一下.") == "我先走,"
+    assert translation.chinese_source("Đợi mục chúc, tận 一下, quay đi.") == ""
+    assert translation.chinese_source("快 一点 , nhén lén mục chúc, quay đi.") == "快 一点 ,"
+    assert translation.chinese_source("nǐ hǎo 你好") == ""  # pinyin is not translated
 
     seen = []
 
@@ -168,3 +174,17 @@ def test_old_lessons_get_context_readings_without_losing_text_or_translation(mon
     assert segment["pinyin"] == "shàng"
     assert saved["analysis"]["version"] == app_module.ANALYSIS_VERSION
     assert saved["filename"] == "a"
+
+
+def test_mixed_line_only_learns_the_chinese_clauses():
+    from watch2learn.lesson import cue_tokens
+    from watch2learn.subtitles import Cue
+
+    tokens = cue_tokens(Cue("c", 0, 1000, "Tôi đi trước nhé, 我先走, tận 一下."))
+    words = [token["text"] for token in tokens if token.get("vocabulary_id")]
+    assert "".join(words) == "我先走"
+    assert "".join(token["text"] for token in tokens) == "Tôi đi trước nhé, 我先走, tận 一下."
+    foreign = [token["text"] for token in tokens if token.get("foreign")]
+    assert foreign == ["Tôi đi trước nhé,", " tận 一下."]
+    first = next(token for token in tokens if token.get("vocabulary_id"))
+    assert "Tôi đi trước nhé, 我先走"[first["start_offset"]] == "我"

@@ -20,6 +20,12 @@ import { openPractice } from "./practice.js";
 import { createNarration, speak, stopSpeaking, toneDescription } from "./speech.js";
 import { actionButton, button, cleanSenses, element, escapeRegExp, timeLabel } from "./ui.js";
 
+/** The Chinese part of a cue (other-language parts are never read or practised). */
+export function chineseText(cue) {
+  if (!cue?.segments?.some((segment) => segment.foreign)) return cue?.text || "";
+  return cue.segments.filter((segment) => !segment.foreign).map((segment) => segment.text).join("").trim();
+}
+
 export function firstMeaning(word) {
   return ownMeaning(word.id) || cleanSenses(word.definitions_vi).senses[0] || "";
 }
@@ -105,7 +111,7 @@ export function renderWordCard(container, ctx, wordId, occurrenceIndex = 0) {
   const listen = actionRow("Nghe");
   listen.append(
     actionButton("listen", "🔊", "Phát âm", () => speak(surface, 0.7)),
-    actionButton("listen", "▶", "Câu gốc", () => playSentence(ctx, cueIndex, occurrence.cue_text), {
+    actionButton("listen", "▶", "Câu gốc", () => playSentence(ctx, cueIndex, chineseText(cue) || occurrence.cue_text), {
       title: "Nghe câu chứa từ này trong video",
     }),
   );
@@ -419,8 +425,8 @@ export function explainSentence(box, ctx, cueIndex, { speakIt }) {
       {
         title: "Đọc thế nào",
         build: (facts) => [
-          [chinese("p", "lesson-zh", cue.text), facts.syllables.map((item) => item.pinyin).join(" ")],
-          [{ text: "Câu này đọc là", lang: "vi" }, { text: cue.text, lang: "zh", rate: 0.8 }],
+          [chinese("p", "lesson-zh", chineseText(cue)), facts.syllables.map((item) => item.pinyin).join(" ")],
+          [{ text: "Câu này đọc là", lang: "vi" }, { text: chineseText(cue), lang: "zh", rate: 0.8 }],
         ],
       },
       {
@@ -454,8 +460,8 @@ export function sentenceActions(ctx, cueIndex, explainBox) {
   };
   const listen = actionRow("Nghe");
   listen.append(
-    actionButton("listen", "▶", "Câu gốc", () => playSentence(ctx, cueIndex, cue.text), { title: "Nghe câu này trong video" }),
-    actionButton("listen", "🔈", "Đọc chậm", () => speak(cue.text, 0.65)),
+    actionButton("listen", "▶", "Câu gốc", () => playSentence(ctx, cueIndex, chineseText(cue)), { title: "Nghe câu này trong video" }),
+    actionButton("listen", "🔈", "Đọc chậm", () => speak(chineseText(cue), 0.65)),
   );
   const learn = actionRow("Học");
   learn.append(
@@ -463,12 +469,12 @@ export function sentenceActions(ctx, cueIndex, explainBox) {
     actionButton("lesson", "🗣", "Nghe giảng câu", () => explainSentence(explainBox, ctx, cueIndex, { speakIt: true })),
     actionButton("practice", "🎙", "Đọc thử", () =>
       openPractice({
-        target: cue.text,
+        target: chineseText(cue),
         pinyin,
         translation: cue.translation_vi,
         kind: "sentence",
         itemId: status ? sentenceKey(ctx.lesson.id, cue.id) : null,
-        playModel: () => playSentence(ctx, cueIndex, cue.text),
+        playModel: () => playSentence(ctx, cueIndex, chineseText(cue)),
         onScored: () => ctx.onChange(),
       }),
     ),
@@ -493,7 +499,7 @@ export function renderSentenceCard(container, ctx, cueIndex) {
   text.lang = "zh";
   for (const segment of cue.segments) {
     if (!segment.vocabulary_id || !ctx.wordsById.has(segment.vocabulary_id)) {
-      text.append(segment.text);
+      text.append(segment.foreign ? element("span", "foreign-text", segment.text) : segment.text);
       continue;
     }
     const word = ctx.wordsById.get(segment.vocabulary_id);

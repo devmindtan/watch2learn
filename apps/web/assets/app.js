@@ -7,7 +7,7 @@ import {
   wordStatus,
 } from "./learner.js";
 import { initLibrary, refreshLibrary } from "./library.js";
-import { firstMeaning, renderWordCard, sentenceActions, setWordStatus } from "./study.js";
+import { chineseText, firstMeaning, renderWordCard, sentenceActions, setWordStatus } from "./study.js";
 import {
   configureSpeech,
   createNarration,
@@ -676,11 +676,19 @@ function openLesson(lesson, focus = {}) {
   backfillTranslations();
 }
 
+/** Another language inside a Chinese line: shown as is, never learnt or translated. */
+function foreignText(text) {
+  const node = element("span", "foreign-text", text);
+  node.lang = "vi";
+  node.title = "Không phải tiếng Trung — giữ nguyên, không dịch";
+  return node;
+}
+
 function renderCueText(container, cue, { compact = false } = {}) {
   container.replaceChildren();
   for (const segment of cue.segments) {
     if (!segment.vocabulary_id) {
-      container.append(segment.text);
+      container.append(segment.foreign ? foreignText(segment.text) : segment.text);
       continue;
     }
     const word = wordsById.get(segment.vocabulary_id);
@@ -932,7 +940,7 @@ function playFromCue(index) {
 function playClip(index) {
   if (index === undefined || index < 0) return;
   if (!seekTo(index)) {
-    speak(state.lesson.cues[index].text);
+    speak(chineseText(state.lesson.cues[index]));
     return;
   }
   state.clipEnd = state.loop ? null : state.lesson.cues[index].end_ms;
@@ -998,7 +1006,7 @@ nextButton.addEventListener("click", () => stepCue(1));
 replayButton.addEventListener("click", () => playClip(state.activeCue));
 loopButton.addEventListener("click", toggleLoop);
 nowTime.addEventListener("click", () => playFromCue(state.activeCue));
-speakCueButton.addEventListener("click", () => speak(state.lesson?.cues[state.activeCue]?.text));
+speakCueButton.addEventListener("click", () => speak(chineseText(state.lesson?.cues[state.activeCue])));
 
 function pauseFollowing() {
   state.followTranscript = false;

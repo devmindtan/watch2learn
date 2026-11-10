@@ -6,6 +6,8 @@ from functools import lru_cache
 from pathlib import Path
 from threading import Lock
 
+from .mandarin_text import chinese_text
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MODEL_PATH = PROJECT_ROOT / "data" / "models" / "opus-mt-zh-vi"
 MODEL_FILES = ("model.bin", "config.json", "shared_vocabulary.json", "source.spm", "target.spm")
@@ -15,26 +17,13 @@ SPECIAL_TOKENS = {"</s>", "<s>", "<pad>", "<unk>"}
 _LOCK = Lock()
 WRAPPED_RE = re.compile(r"^\s*[（(【\[]\s*(.+?)\s*[）)】\]]\s*$")
 MARKUP_RE = re.compile(r"\{\\[^}]*\}|<[^>]{1,40}>")
-HAN_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
-NON_HAN_LETTERS_RE = re.compile(r"[^\W\d_\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+")
-KANA_HANGUL_RE = re.compile(r"[\u3040-\u30ff\u31f0-\u31ff\uac00-\ud7af\u1100-\u11ff]")
-TRANSLATION_UNIT = "zh-cue-v3"
+TRANSLATION_UNIT = "zh-clause-v4"
 
 
 def chinese_source(text: str) -> str:
-    """The part of a cue that may be translated: only Chinese is ever translated.
-
-    Mostly-Chinese lines are kept whole (names like iPhone stay in context). Lines
-    that are mostly another script keep only their Chinese characters. Lines with
-    no Chinese characters (English, Japanese kana, Korean, ♪ …) return "".
-    """
-    han = len(HAN_RE.findall(text))
-    if not han or KANA_HANGUL_RE.search(text):  # kanji/hanja inside Japanese/Korean
-        return ""
-    foreign_words = len(NON_HAN_LETTERS_RE.findall(text))
-    if han >= foreign_words * 2:  # one foreign word ≈ two Chinese characters
-        return text
-    return " ".join(NON_HAN_LETTERS_RE.sub(" ", text).split())
+    """The part of a cue that may be translated: only Chinese is ever translated
+    (clause by clause, see mandarin_text)."""
+    return chinese_text(text)
 
 
 def clean_output(text: str) -> str:
