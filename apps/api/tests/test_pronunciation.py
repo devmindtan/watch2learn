@@ -156,6 +156,42 @@ def test_preparation_writes_every_lesson_once(monkeypatch, tmp_path):
     prepare.prepare_lesson(lesson_id)  # idempotent: nothing is written twice
     assert len(prompts) == total
 
+    # Every word is in the global dictionary with its lesson and source video.
+    from watch2learn import word_dictionary
+
+    words = word_dictionary.entries(explain.lesson_version())
+    assert words["total"] == len(lesson["vocabulary"])
+    assert all(item["has_lesson"] and item["video_count"] == 1 for item in words["entries"])
+    assert {item["lesson_id"] for item in words["entries"]} == {lesson_id}
+    assert word_dictionary.entries(explain.lesson_version(), "học")["entries"][0]["word"] == "学习"
+
+    # Another video with the same words writes only its own sentence lessons.
+    other = dict(lesson, id="b" * 32)
+    other_requests = explain.lesson_requests(other)
+    assert all(explain.is_ready(item) for item in other_requests if item.word)
+
+    # Deleting a video keeps the dictionary entry and its lesson.
+    word_dictionary.forget_lesson(lesson_id)
+    kept = word_dictionary.entries(explain.lesson_version())["entries"]
+    assert len(kept) == len(lesson["vocabulary"]) and kept[0]["video_count"] == 0
+    assert kept[0]["has_lesson"]
+
+
+def test_learner_can_ask_for_a_word_lesson_to_be_rewritten(monkeypatch, tmp_path):
+    lesson_id = make_lesson(monkeypatch, tmp_path)
+    replies = iter(["<cach_dung>Bản đầu.</cach_dung>", "<cach_dung>Bản mới.</cach_dung>"])
+
+    def fake_stream(prompt, base_url=None):
+        yield next(replies)
+
+    monkeypatch.setattr(explain, "stream_ollama", fake_stream)
+    body = {"lesson_id": lesson_id, "word_id": vocabulary_id("学习"), "cue_id": "cue-2"}
+    texts = lambda events: [e["text"] for e in events if e["type"] == "section"]  # noqa: E731
+    assert texts(read_events(body)) == ["Bản đầu."]
+    assert texts(read_events(body)) == ["Bản đầu."]  # from the dictionary
+    assert texts(read_events(body | {"refresh": True})) == ["Bản mới."]
+    assert texts(read_events(body)) == ["Bản mới."]
+
 
 def test_sentence_lesson_and_offline_fallback(monkeypatch, tmp_path):
     lesson_id = make_lesson(monkeypatch, tmp_path)

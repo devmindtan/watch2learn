@@ -320,6 +320,11 @@ export function lessonPanel(box, ctx, { title, request, plan, speakIt }) {
   controls.append(
     actionButton("lesson", "🗣", "Nghe giảng", startSpeaking, { title: "Nghe phần quan trọng, ngắn gọn" }),
     actionButton("plain", "⏹", "Dừng", () => stopSpeaking()),
+    actionButton("plain", "↻", "Soạn lại", () => {
+      if (window.confirm("Nhờ AI soạn lại bài giảng này? Bản cũ sẽ bị thay thế.")) {
+        lessonPanel(box, ctx, { title, request: { ...request, refresh: true }, plan, speakIt: false });
+      }
+    }, { title: "Bài giảng chưa đúng? Nhờ AI soạn lại" }),
   );
   box.replaceChildren(element("h3", null, title), controls, status, body);
   box.hidden = false;

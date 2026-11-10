@@ -127,9 +127,15 @@ that sentence; other readings stay available as `alternatives`.
   data (context pinyin, tones, CVDICT, `pronunciation.learner_tips`); the rest is
   written by the local Ollama model and labelled as AI. Chinese grammar terms in
   the model's prose are replaced by Vietnamese ones.
-- The word lesson prompt is context-free (word, dictionary reading, meanings), so
-  the `explanations` cache works as a global dictionary: a word written for one
-  video is reused by every later video. `prepare.py` writes every word lesson
+- Global word dictionary (`word_dictionary.py`, tables `dictionary_words` keyed by
+  word ID + reading, and `dictionary_sources` linking each entry to the videos that
+  contain it): every word of every video is added when the video is queued, with
+  its Vietnamese meanings; its AI lesson is written once (context-free prompt:
+  word, reading, meanings) and stored on the entry, so a later video reuses it.
+  Deleting a video removes only the link. `GET /api/dictionary?q=` lists entries
+  (library tab "Từ điển"); `POST /api/explain` with `refresh: true` lets the
+  learner have a lesson rewritten. Sentence lessons stay in the `explanations`
+  cache keyed by prompt. `prepare.py` writes every word lesson
   (most frequent first) and then every sentence lesson of a video in one
   background thread after import and at startup; it is resumable and skips cached
   items. It runs only where the machine rule allows a long model run (GPU machine,

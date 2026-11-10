@@ -15,7 +15,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Annotated, Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,6 +33,7 @@ from . import (
     storage,
     translation,
     tts,
+    word_dictionary,
     youtube,
 )
 from .asr import model_ready, transcribe_clip, transcribe_mandarin
@@ -513,6 +514,7 @@ async def delete_lesson(lesson_id: str) -> None:
     if not jobs.delete(lesson_id):
         raise HTTPException(status_code=404, detail="Lesson was not found")
     storage.delete_media(lesson_id)
+    word_dictionary.forget_lesson(lesson_id)  # entries and written lessons are kept
 
 
 @app.get("/api/lessons/{lesson_id}/media")
@@ -880,6 +882,7 @@ class ExplainRequest(BaseModel):
     lesson_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     word_id: str | None = Field(default=None, pattern=WORD_ID_PATTERN)
     cue_id: str | None = Field(default=None, max_length=64)
+    refresh: bool = False  # the learner asked for the lesson to be written again
 
 
 def explanation_events(facts: dict, lesson_events) -> Iterator[bytes]:
@@ -922,17 +925,31 @@ async def explain_text(request: ExplainRequest) -> StreamingResponse:
         )
         # The reading shown follows this sentence; the lesson itself is shared by every video.
         facts = explain.pronunciation_facts(occurrence["surface"], occurrence.get("pinyin"))
-        events = explain.stream_lesson(*explain.word_request(word))
+        lesson_request = explain.word_request(word)
     elif request.cue_id:
         cue = find_cue(lesson, request.cue_id)
         facts = explain.sentence_facts(cue)
-        events = explain.stream_lesson(*explain.sentence_request(lesson, cue))
+        lesson_request = explain.sentence_request(lesson, cue)
     else:
         raise HTTPException(status_code=422, detail="word_id or cue_id is required")
+    if request.refresh:
+        await asyncio.to_thread(explain.forget, lesson_request)
+    events = explain.stream_lesson(lesson_request)
     return StreamingResponse(
         explanation_events(facts, events),
         media_type="application/x-ndjson",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/dictionary")
+async def dictionary_entries(
+    q: Annotated[str, Query(max_length=80)] = "",
+    limit: Annotated[int, Query(ge=0, le=20000)] = 5000,
+) -> dict:
+    """The global dictionary: every word met in any video, with its shared lesson."""
+    return await asyncio.to_thread(
+        word_dictionary.entries, explain.lesson_version(), q.strip(), limit
     )
 
 

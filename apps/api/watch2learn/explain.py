@@ -17,10 +17,11 @@ import re
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
+from dataclasses import dataclass
 
 from pypinyin.contrib.tone_convert import to_tone, to_tone3
 
-from . import pronunciation
+from . import pronunciation, word_dictionary
 from .gpu_host import GPU
 from .jobs import connect, initialize, now
 
@@ -30,6 +31,19 @@ TIMEOUT_SECONDS = 300
 PROMPT_VERSION = "vi-teacher-5"
 HAN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+")
 TAG = re.compile(r"<(\w+)>(.*?)</\1>", re.DOTALL)
+
+
+@dataclass(frozen=True)
+class LessonRequest:
+    """One lesson to write. Word lessons live in the global dictionary (`word`);
+    sentence lessons in the explanation cache, keyed by their prompt."""
+
+    prompt: str
+    keys: tuple[str, ...]
+    subject: str
+    word: dict | None = None
+
+
 # Reading, meaning and pronunciation notes are built from verified data; the model
 # writes only the parts that need world knowledge.
 WORD_SECTIONS = ("cach_dung", "luu_y")
@@ -215,31 +229,71 @@ def cache_key(prompt: str) -> str:
     return hashlib.sha256(f"{PROMPT_VERSION}\n{model_name()}\n{prompt}".encode()).hexdigest()
 
 
-def stream_lesson(
-    prompt: str, keys: tuple[str, ...], subject: str, base_url: str | None = None
-) -> Iterator[dict]:
-    """Yield sections as they are written (or all at once from the cache)."""
-    key = cache_key(prompt)
-    initialize_cache()
+def lesson_version() -> str:
+    return f"{PROMPT_VERSION}:{model_name()}"
+
+
+def cached_events(request: LessonRequest) -> list[dict] | None:
+    if request.word:
+        stored = word_dictionary.stored_lesson(request.word, lesson_version())
+        if stored is not None:
+            return stored
+    initialize_cache()  # sentence lessons, and word lessons written before the dictionary
     with connect() as connection:
         row = connection.execute(
-            "SELECT text FROM explanations WHERE cache_key = ?", (key,)
+            "SELECT text FROM explanations WHERE cache_key = ?", (cache_key(request.prompt),)
         ).fetchone()
-    if row:
-        for event in json.loads(row["text"]):
+    if not row:
+        return None
+    events = json.loads(row["text"])
+    if request.word:  # move an older cached word lesson into the dictionary
+        word_dictionary.save_lesson(request.word, events, lesson_version())
+    return events
+
+
+def store_events(request: LessonRequest, events: list[dict]) -> None:
+    if request.word:
+        word_dictionary.save_lesson(request.word, events, lesson_version())
+        return
+    initialize_cache()
+    with connect() as connection:
+        connection.execute(
+            "INSERT OR REPLACE INTO explanations VALUES (?, ?, ?, ?, ?)",
+            (
+                cache_key(request.prompt),
+                request.subject,
+                model_name(),
+                json.dumps(events, ensure_ascii=False),
+                now(),
+            ),
+        )
+
+
+def forget(request: LessonRequest) -> None:
+    """The learner asked for the lesson to be written again."""
+    if request.word:
+        word_dictionary.clear_lesson(request.word)
+    initialize_cache()
+    with connect() as connection:
+        connection.execute(
+            "DELETE FROM explanations WHERE cache_key = ?", (cache_key(request.prompt),)
+        )
+
+
+def stream_lesson(request: LessonRequest, base_url: str | None = None) -> Iterator[dict]:
+    """Yield sections as they are written (or all at once when already stored)."""
+    stored = cached_events(request)
+    if stored is not None:
+        for event in stored:
             yield event | {"cached": True}
         return
     events = []
-    for event in tagged_sections(stream_ollama(prompt, base_url), keys):
+    for event in tagged_sections(stream_ollama(request.prompt, base_url), request.keys):
         events.append(event)
         yield event
     if not any("key" in event for event in events):
         raise RuntimeError("The local model returned an empty explanation")
-    with connect() as connection:
-        connection.execute(
-            "INSERT OR REPLACE INTO explanations VALUES (?, ?, ?, ?, ?)",
-            (key, subject, model_name(), json.dumps(events, ensure_ascii=False), now()),
-        )
+    store_events(request, events)
 
 
 def pronunciation_facts(text: str, marked_pinyin: str | None = None) -> dict:
@@ -288,20 +342,20 @@ def sentence_facts(cue: dict) -> dict:
     return facts
 
 
-def word_request(word: dict) -> tuple[str, tuple[str, ...], str]:
-    """(prompt, sections, subject) of the shared lesson for this word and reading."""
+def word_request(word: dict) -> LessonRequest:
+    """The shared lesson for this word and reading (no video context on purpose)."""
     facts = pronunciation_facts(word["word"], word.get("pinyin"))
-    return word_prompt(word, facts), WORD_SECTIONS, word["id"]
+    return LessonRequest(word_prompt(word, facts), WORD_SECTIONS, word["id"], word)
 
 
-def sentence_request(lesson: dict, cue: dict) -> tuple[str, tuple[str, ...], str]:
+def sentence_request(lesson: dict, cue: dict) -> LessonRequest:
     prompt = sentence_prompt(
         cue["text"], cue.get("translation_vi"), sentence_words(lesson, cue), sentence_facts(cue)
     )
-    return prompt, SENTENCE_SECTIONS, f"sentence:{cue['text']}"
+    return LessonRequest(prompt, SENTENCE_SECTIONS, f"sentence:{cue['text']}")
 
 
-def lesson_requests(lesson: dict) -> list[tuple[str, tuple[str, ...], str]]:
+def lesson_requests(lesson: dict) -> list[LessonRequest]:
     """Every lesson a video offers: words first (most frequent first), then sentences."""
     words = sorted(lesson.get("vocabulary", []), key=lambda item: -item.get("occurrence_count", 0))
     requests = [word_request(word) for word in words]
@@ -314,18 +368,13 @@ def lesson_requests(lesson: dict) -> list[tuple[str, tuple[str, ...], str]]:
     return requests
 
 
-def is_cached(prompt: str) -> bool:
-    initialize_cache()
-    with connect() as connection:
-        row = connection.execute(
-            "SELECT 1 FROM explanations WHERE cache_key = ?", (cache_key(prompt),)
-        ).fetchone()
-    return row is not None
+def is_ready(request: LessonRequest) -> bool:
+    return cached_events(request) is not None
 
 
-def write_lesson(prompt: str, keys: tuple[str, ...], subject: str, base_url: str) -> None:
-    """Write one lesson into the shared cache (used by the background preparation)."""
-    for _event in stream_lesson(prompt, keys, subject, base_url):
+def write_lesson(request: LessonRequest, base_url: str) -> None:
+    """Write one lesson (used by the background preparation)."""
+    for _event in stream_lesson(request, base_url):
         pass
 
 

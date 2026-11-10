@@ -70,6 +70,9 @@
           <button type="button" role="tab" data-library-tab="sentences" aria-selected="false" aria-controls="library-sentences" tabindex="-1">
             Câu <span id="count-sentences" class="count"></span>
           </button>
+          <button type="button" role="tab" data-library-tab="dictionary" aria-selected="false" aria-controls="library-dictionary" tabindex="-1">
+            Từ điển <span id="count-dictionary" class="count"></span>
+          </button>
         </div>
 
         <div id="library-videos" class="library-panel library-videos" role="tabpanel">
@@ -161,6 +164,15 @@
           </div>
           <p id="sentences-empty" class="muted library-empty" hidden></p>
           <ol id="sentences-list" class="library-list"></ol>
+        </div>
+
+        <div id="library-dictionary" class="library-panel" role="tabpanel" hidden>
+          <div class="library-toolbar">
+            <p id="dictionary-summary" class="muted dictionary-summary">Mọi từ đã gặp trong các video, mỗi từ một mục, dùng chung cho mọi video.</p>
+            <input id="dictionary-search" type="search" placeholder="Tra chữ Hán, pinyin hoặc nghĩa…" aria-label="Tra từ điển" />
+          </div>
+          <p id="dictionary-empty" class="muted library-empty" hidden></p>
+          <ol id="dictionary-list" class="library-list"></ol>
         </div>
         </div>
 

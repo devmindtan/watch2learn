@@ -255,3 +255,14 @@ a defect that escaped a completed check, or a manual task repeated at least twic
 - Verification: `test_preparation_writes_every_lesson_once`, the word lesson test
   (another cue reuses the cache); Playwright at 1600 px measures the same left
   edge for brand, tabs, lists and the video stage; 390 px has no horizontal scroll.
+
+## 2026-11-10 — "Global dictionary" means a real, visible store
+
+- Evidence: asked for a global dictionary, a prompt-hash cache was delivered; the
+  learner could not see or search any dictionary and asked where it was.
+- Root cause: the request was read as "avoid regenerating" instead of as a
+  product feature (a browsable store of words with meanings, lessons, sources).
+- Reusable rule: when the learner names a data store ("từ điển", "kho"), build it
+  as an explicit table with an API and a screen, not only an internal cache.
+- Verification: `test_preparation_writes_every_lesson_once` checks entries,
+  sources, search and reuse; Playwright opens the "Từ điển" tab and a word.

@@ -1,8 +1,8 @@
 """Write every word and sentence lesson of a video ahead of time.
 
 After an import (and at startup for saved videos) one background thread writes
-the lessons of each video into the shared explanation cache, so a click shows
-the lesson at once. Word lessons do not depend on the video, so a word met in an
+the lessons of each video, so a click shows the lesson at once. Every word goes
+into the global dictionary (word_dictionary.py) with its lesson; a word met in an
 earlier video is never written again. The thread is resumable and idempotent:
 anything already cached is skipped.
 
@@ -18,7 +18,7 @@ import os
 import threading
 import time
 
-from . import explain, jobs
+from . import explain, jobs, word_dictionary
 from .gpu_host import GPU
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,11 @@ def status(lesson_id: str) -> dict | None:
 
 
 def enqueue(lesson_id: str) -> None:
+    """Add the video's words to the dictionary now; write their lessons in the background."""
     global _thread
+    job = jobs.get(lesson_id)
+    if job and job["status"] == "complete":
+        word_dictionary.register_lesson(lesson_id, job["result"].get("vocabulary", []))
     with _lock:
         if lesson_id not in _queue:
             _queue.append(lesson_id)
@@ -97,23 +101,25 @@ def prepare_lesson(lesson_id: str) -> None:
     job = jobs.get(lesson_id)
     if not job or job["status"] != "complete":
         return
-    requests = explain.lesson_requests(job["result"])
-    missing = [item for item in requests if not explain.is_cached(item[0])]
+    lesson = job["result"]
+    word_dictionary.register_lesson(lesson_id, lesson.get("vocabulary", []))
+    requests = explain.lesson_requests(lesson)
+    missing = [item for item in requests if not explain.is_ready(item)]
     total = len(requests)
     _set(lesson_id, state="running", done=total - len(missing), total=total, reason=None)
     failures = 0
-    for prompt, keys, subject in missing:
-        if explain.is_cached(prompt):  # written by a click meanwhile
+    for request in missing:
+        if explain.is_ready(request):  # written by a click meanwhile
             _set(lesson_id, done=status(lesson_id)["done"] + 1)
             continue
         url = _wait_for_model(lesson_id)
         _set(lesson_id, state="running", reason=None)
         try:
-            explain.write_lesson(prompt, keys, subject, url)
+            explain.write_lesson(request, url)
             failures = 0
         except Exception as error:  # one bad answer must not stop the video
             failures += 1
-            logger.warning("Could not prepare lesson %s: %s", subject, error)
+            logger.warning("Could not prepare lesson %s: %s", request.subject, error)
             if failures >= MAX_FAILURES:
                 _set(lesson_id, state="error", reason=f"AI local lỗi: {error}")
                 return

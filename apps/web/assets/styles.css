@@ -495,3 +495,5 @@ main { width: 100%; }
   }
   body.study-open { overflow: hidden; }
 }
+.dictionary-summary { margin: 0; font-size: .86rem; }
+.library-study .library-item:not([tabindex]) { opacity: .7; }

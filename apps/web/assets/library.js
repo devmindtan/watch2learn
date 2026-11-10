@@ -17,6 +17,7 @@ const lists = {
     search: $("#sentences-search"),
     status: "saved",
   },
+  dictionary: { list: $("#dictionary-list"), empty: $("#dictionary-empty"), search: $("#dictionary-search"), status: null },
 };
 const methodLabels = {
   "faster-whisper": "máy tự nghe",
@@ -26,7 +27,8 @@ const methodLabels = {
 };
 let handlers = {};
 let current = "videos";
-const cache = { words: [], sentences: [] };
+const cache = { words: [], sentences: [], dictionary: [] };
+const rowRenderers = { words: wordRow, sentences: sentenceRow, dictionary: dictionaryRow };
 
 export function initLibrary(options) {
   handlers = options;
@@ -66,12 +68,14 @@ export function refreshLibrary() {
 
 async function loadCounts() {
   try {
-    const [words, sentences] = await Promise.all([
+    const [words, sentences, dictionary] = await Promise.all([
       apiJson("/api/library/words"),
       apiJson("/api/library/sentences"),
+      apiJson("/api/dictionary?limit=0"),
     ]);
     $("#count-words").textContent = words.length || "";
     $("#count-sentences").textContent = sentences.length || "";
+    $("#count-dictionary").textContent = dictionary.total || "";
   } catch {
     /* counts are decorative */
   }
@@ -152,7 +156,15 @@ async function load(kind) {
   const view = lists[kind];
   const query = view.status ? `?status=${view.status}` : "";
   try {
-    cache[kind] = await apiJson(`/api/library/${kind}${query}`);
+    if (kind === "dictionary") {
+      const result = await apiJson("/api/dictionary");
+      cache.dictionary = result.entries;
+      const ready = result.entries.filter((entry) => entry.has_lesson).length;
+      $("#dictionary-summary").textContent =
+        `${result.total} từ đã gặp trong các video · ${ready} từ đã có bài giảng. Mỗi từ chỉ soạn một lần, video sau có từ đó dùng lại ngay.`;
+    } else {
+      cache[kind] = await apiJson(`/api/library/${kind}${query}`);
+    }
   } catch (error) {
     view.empty.hidden = false;
     view.empty.textContent = error.message;
@@ -168,7 +180,9 @@ function render(kind) {
     if (!query) return true;
     const text = kind === "words"
       ? [row.word, row.pinyin, row.meaning, row.own_meaning, row.sentence]
-      : [row.text, row.pinyin, row.translation];
+      : kind === "dictionary"
+        ? [row.word, row.traditional, row.pinyin, ...(row.meanings || [])]
+        : [row.text, row.pinyin, row.translation];
     return plain(text.filter(Boolean).join(" ")).includes(query);
   });
   view.empty.hidden = rows.length > 0;
@@ -176,12 +190,14 @@ function render(kind) {
     ? "Không có mục nào khớp."
     : kind === "words"
       ? "Chưa có từ nào. Trong bài học, bấm vào một từ rồi chọn “Lưu” hoặc “Đã thuộc”."
-      : "Chưa có câu nào. Trong bài học, bấm “Lưu câu” ở khung câu đang học.";
-  view.list.replaceChildren(...rows.map(kind === "words" ? wordRow : sentenceRow));
+      : kind === "dictionary"
+        ? "Từ điển còn trống. Import một video, mọi từ trong đó sẽ được thêm vào đây."
+        : "Chưa có câu nào. Trong bài học, bấm “Lưu câu” ở khung câu đang học.";
+  view.list.replaceChildren(...rows.map(rowRenderers[kind]));
   markSelection();
-  const first = rows.find((row) => row.lesson_exists);
+  const first = rows.find((row) => row.lesson_exists || row.lesson_id);
   if (wideScreen.matches && !selection && first) {
-    openStudy(kind === "words" ? studyTarget(first) : sentenceTarget(first), { focus: false });
+    openStudy(kind === "sentences" ? sentenceTarget(first) : studyTarget(first), { focus: false });
   }
 }
 
@@ -277,6 +293,41 @@ function wordRow(row) {
         load("words");
         loadCounts();
       }, { title: `Xoá ${row.word} khỏi kho` }),
+    ),
+  );
+  return item;
+}
+
+/** A global dictionary entry; opens in the newest video that contains the word. */
+function dictionaryRow(row) {
+  const target = { lessonId: row.lesson_id, wordId: row.word_id };
+  const item = row.lesson_id ? openableRow(() => openStudy(target), target) : element("li", "library-item");
+  const main = element("div", "library-item-main");
+  const hanzi = element("strong", "library-hanzi", row.word);
+  hanzi.lang = "zh";
+  const head = element("div", "library-item-head");
+  head.append(hanzi, element("span", "library-pinyin", row.pinyin || ""));
+  main.append(head, element("p", "library-meaning", row.meaning || "Chưa có nghĩa tiếng Việt"));
+  const badges = element("div", "badges");
+  badges.append(element("span", "badge", row.video_count ? `${row.video_count} video` : "Video đã bị xoá"));
+  badges.append(
+    row.has_lesson ? element("span", "badge badge-saved", "Có bài giảng") : element("span", "badge", "Chưa soạn bài giảng"),
+  );
+  main.append(badges);
+  item.append(
+    main,
+    quickActions(
+      actionButton("listen", "🔊", null, () => speak(row.word, 0.7), { title: `Phát âm ${row.word}` }),
+      row.lesson_id &&
+        actionButton("save", "☆", null, async () => {
+          try {
+            await updateWord(row.word_id, { status: "saved", lesson_id: row.lesson_id });
+          } catch (error) {
+            window.alert(error.message);
+            return;
+          }
+          loadCounts();
+        }, { title: `Lưu ${row.word} vào từ vựng đang học` }),
     ),
   );
   return item;
@@ -431,7 +482,8 @@ export async function openStudy(target, { focus = true } = {}) {
   const wordsById = new Map(lesson.vocabulary.map((word) => [word.id, word]));
   const cueIndexById = new Map(lesson.cues.map((cue, index) => [cue.id, index]));
   const occurrence = wordId ? Math.max(0, wordsById.get(wordId)?.occurrences.findIndex((item) => item.cue_id === cueId) ?? 0) : 0;
-  paneState = { lesson, wordsById, cueIndexById, cueId, wordId, occurrence };
+  const shownCue = cueId || wordsById.get(wordId)?.occurrences[occurrence]?.cue_id;
+  paneState = { lesson, wordsById, cueIndexById, cueId: shownCue, wordId, occurrence };
   $("#study-title").textContent = lesson.filename || "Bài học";
   if (lesson.media?.available) {
     const source = apiUrl(lesson.media.url);
