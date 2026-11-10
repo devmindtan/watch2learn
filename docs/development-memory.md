@@ -281,3 +281,19 @@ a defect that escaped a completed check, or a manual task repeated at least twic
 - Verification: `test_only_chinese_is_sent_for_translation` and
   `test_mixed_line_only_learns_the_chinese_clauses` use the screenshot lines;
   saved lessons re-analysed to zh-v4 / zh-clause-v4 show the same on port 8000.
+
+## 2026-11-10 — Spoken lesson: use only, as one flowing talk
+
+- Evidence: the learner objected that "Nghe giảng" still read the reading and the
+  meaning and sounded like a list ("Cách dùng:", "Lưu ý:"). A first prompt rewrite
+  that put instructions inside the tags made qwen3:8b echo them ("Từ này dùng thế
+  nào và dùng ở đâu: …") and break the example format.
+- Root cause: section headers were spoken; on-screen facts were narrated; the
+  prompt mixed instructions with the output template.
+- Reusable rule: narration covers only "dùng thế nào, dùng ở đâu, lưu ý nếu có",
+  with no spoken headers; what is visible on screen is not read out. For the 8B
+  model keep instructions outside the tags and give one worked example for a
+  different word; let unforced-language text through so Chinese words inside
+  Vietnamese prose are read by the Chinese voice.
+- Verification: real outputs for 手机 and 了 start with "Từ này…" and have clean
+  `zh | vi` examples; `test_word_lesson_streams_vietnamese_sections_and_is_cached`.

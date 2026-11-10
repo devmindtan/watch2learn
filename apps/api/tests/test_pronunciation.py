@@ -85,7 +85,7 @@ def read_events(body: dict) -> list[dict]:
 WORD_REPLY = (
     "<cach_dung>Hay gặp ở trường, 动词 đi với 中文 (tiếng Trung).</cach_dung>\n"
     "<vi_du>我们一起学习。 | Chúng ta cùng học.</vi_du>\n<vi_du>không có chữ Hán | x</vi_du>\n"
-    "<luu_y>Không có gì đặc biệt.</luu_y>"
+    "<luu_y>Bạn cần lưu ý là không có gì đặc biệt.</luu_y>"
 )
 
 
@@ -121,7 +121,7 @@ def test_word_lesson_streams_vietnamese_sections_and_is_cached(monkeypatch, tmp_
     ]
     assert events[-1] == {"type": "done", "cached": False}
     # One shared lesson per word: the video sentence is not part of the prompt.
-    assert "gần “x” tiếng Việt" in prompts[0] and "今天学习中文。" not in prompts[0]
+    assert "学 = xué (thanh 2)" in prompts[0] and "今天学习中文。" not in prompts[0]
     assert events[0]["facts"]["tips"][0].startswith("Chữ 学:")
 
     again = read_events(body)

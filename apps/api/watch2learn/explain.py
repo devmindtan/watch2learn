@@ -29,7 +29,7 @@ from .mandarin_text import chinese_text
 DEFAULT_URL = "http://127.0.0.1:11434"
 DEFAULT_MODEL = "qwen3:8b"
 TIMEOUT_SECONDS = 300
-PROMPT_VERSION = "vi-teacher-5"
+PROMPT_VERSION = "vi-teacher-8"
 HAN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+")
 TAG = re.compile(r"<(\w+)>(.*?)</\1>", re.DOTALL)
 
@@ -79,10 +79,39 @@ SYSTEM_PROMPT = (
     "Dữ kiện về cách đọc, thanh điệu và mẹo phát âm được cung cấp là chuẩn: dùng đúng, không tự "
     "sửa. Chỉ nói điều bạn chắc chắn. Trả lời đúng theo các thẻ được yêu cầu, không thêm gì khác."
 )
-FORMAT_RULES = (
-    "<vi_du>câu ví dụ chữ Hán giản thể | nghĩa tiếng Việt</vi_du>\n"
-    "<vi_du>câu ví dụ thứ hai | nghĩa tiếng Việt</vi_du>\n"
-    "Mỗi thẻ 1–3 câu tiếng Việt. Bắt buộc có đủ các thẻ và 2 câu ví dụ ngắn, đơn giản."
+SPOKEN_STYLE = (
+    "Người học đã thấy cách đọc và nghĩa trên màn hình, đừng nhắc lại. Lời giảng sẽ được đọc "
+    "thành tiếng liền một mạch: viết như đang nói chuyện với học viên, câu nối câu tự nhiên, "
+    "không liệt kê, không tiêu đề, không chép lại lời yêu cầu này.\n"
+)
+WORD_TASK = (
+    SPOKEN_STYLE
+    + "Hãy giảng 3 ý theo thứ tự: (1) từ này dùng thế nào: hay đi với từ nào, đứng ở đâu "
+    "trong câu; (2) dùng ở đâu: tình huống nào, trang trọng hay thân mật; (3) lưu ý, chỉ khi "
+    "từ có điểm đặc biệt như dễ nhầm với từ khác, sắc thái, lượng từ riêng.\n"
+    "Ý 1 và 2 viết liền trong thẻ cach_dung (2–3 câu). Ý 3 viết trong thẻ luu_y (1–2 câu), "
+    "không có gì đặc biệt hoặc không chắc chắn thì để thẻ trống, đừng bịa. "
+    "Thêm đúng 2 thẻ vi_du, mỗi thẻ là một câu ngắn "
+    "người bản xứ hay nói, rồi dấu |, rồi nghĩa tiếng Việt; trong thẻ vi_du không có ngoặc.\n"
+    "Bài mẫu cho từ 吃饭 (chỉ để xem cách trình bày, không chép nội dung):\n"
+    "<cach_dung>Từ này là một động từ, thường đứng ngay sau chủ ngữ, và hay đi với 一起 "
+    "(cùng nhau) hoặc 去 (đi) khi rủ ai đó. Bạn sẽ nghe nó hằng ngày trong gia đình, với bạn "
+    "bè, cả ở chỗ làm, vì người Trung Quốc còn dùng nó như một lời hỏi thăm.</cach_dung>\n"
+    "<vi_du>我们一起吃饭吧。 | Chúng mình cùng đi ăn nhé.</vi_du>\n"
+    "<vi_du>你吃饭了吗？ | Bạn ăn cơm chưa?</vi_du>\n"
+    "<luu_y>Bạn cần lưu ý là khi muốn nói ăn một món cụ thể thì bỏ 饭 đi, ví dụ 吃面 là ăn "
+    "mì.</luu_y>"
+)
+SENTENCE_TASK = (
+    SPOKEN_STYLE
+    + "Hãy giảng 2 ý theo thứ tự: (1) câu này thường được nói khi nào, ở đâu, viết trong thẻ "
+    "giao_tiep (1–2 câu); (2) mẫu câu và vai trò của các từ quan trọng, kèm nghĩa, viết nối "
+    "tiếp trong thẻ cau_truc (2–3 câu). Thêm đúng 2 thẻ vi_du, mỗi thẻ là một câu tương tự, "
+    "ngắn, rồi dấu |, rồi nghĩa tiếng Việt; trong thẻ vi_du không có ngoặc.\n"
+    "Cách trình bày:\n"
+    "<giao_tiep>…</giao_tiep>\n<cau_truc>…</cau_truc>\n"
+    "<vi_du>câu chữ Hán giản thể | nghĩa tiếng Việt</vi_du>\n"
+    "<vi_du>câu chữ Hán giản thể | nghĩa tiếng Việt</vi_du>"
 )
 
 
@@ -124,12 +153,12 @@ def initialize_cache() -> None:
 
 
 def facts_block(facts: dict) -> str:
+    """The verified reading only: pronunciation tips are shown on screen, not taught here."""
     syllables = ", ".join(
         f"{item['character']} = {item['pinyin']} (thanh {item['tone']})"
         for item in facts["syllables"]
     )
-    tips = " ".join(facts["tips"]) or "không có lưu ý đặc biệt"
-    return f"Cách đọc chuẩn từng chữ: {syllables}.\nMẹo phát âm chuẩn cho người Việt: {tips}\n"
+    return f"Cách đọc chuẩn từng chữ: {syllables}.\n"
 
 
 def word_prompt(word: dict, facts: dict) -> str:
@@ -138,16 +167,7 @@ def word_prompt(word: dict, facts: dict) -> str:
     return (
         f"Từ đang học: {word['word']}\n"
         f"{facts_block(facts)}"
-        f"Nghĩa trong từ điển: {meanings or 'chưa có'}\n\n"
-        "Cách đọc và nghĩa đã được giảng riêng. Chỉ nói điều quan trọng nhất, ngắn gọn, "
-        "viết theo đúng mẫu:\n"
-        "<cach_dung>Từ này được dùng ở đâu, trong tình huống nào và dùng như thế nào: hay đi "
-        "với từ nào (kèm nghĩa), đứng ở đâu trong câu.</cach_dung>\n"
-        "<vi_du>câu người bản xứ hay nói, chữ Hán giản thể | nghĩa tiếng Việt</vi_du>\n"
-        "<vi_du>câu thứ hai | nghĩa tiếng Việt</vi_du>\n"
-        "<luu_y>Chỉ khi từ này có điểm đặc biệt (dễ nhầm với từ khác, sắc thái, kiêng kỵ, "
-        "lượng từ riêng...). Nếu không có gì đặc biệt thì để trống: <luu_y></luu_y></luu_y>\n"
-        "Mỗi thẻ 1–3 câu tiếng Việt. Hai câu ví dụ ngắn, tự nhiên, như người bản xứ nói hằng ngày."
+        f"Nghĩa trong từ điển: {meanings or 'chưa có'}\n\n" + WORD_TASK
     )
 
 
@@ -159,10 +179,7 @@ def sentence_prompt(sentence: str, translation: str | None, words: list[dict], f
         f"Câu đang học: {sentence}\n"
         f"{facts_block(facts)}"
         f"Bản dịch máy: {translation or 'chưa có'}\n"
-        f"Nghĩa từng từ theo từ điển: {glossary or 'chưa có'}\n\n"
-        "Cách đọc, nghĩa và lưu ý phát âm đã được giảng riêng. Bạn chỉ viết theo đúng mẫu:\n"
-        "<cau_truc>Mẫu câu và vai trò của các từ quan trọng (kèm nghĩa).</cau_truc>\n"
-        "<giao_tiep>Câu này thường được nói khi nào, ở đâu.</giao_tiep>\n" + FORMAT_RULES
+        f"Nghĩa từng từ theo từ điển: {glossary or 'chưa có'}\n\n" + SENTENCE_TASK
     )
 
 
@@ -201,12 +218,14 @@ def stream_ollama(prompt: str, base_url: str | None = None) -> Iterator[str]:
 def is_empty_note(text: str) -> bool:
     """An optional section the model filled with "nothing special" instead of leaving it empty."""
     lowered = text.lower().strip(" .")
+    lowered = lowered.removeprefix("bạn cần lưu ý là").strip(" ,:")
     return not lowered or (len(lowered) < 60 and lowered.startswith("không có"))
 
 
 def parse_example(text: str) -> dict | None:
     chinese, _, vietnamese = text.partition("|")
-    chinese, vietnamese = clean(chinese), clean(vietnamese)
+    chinese = clean(re.sub(r"[（(][^）)]*[）)]", "", chinese))  # no gloss inside the sentence
+    vietnamese = re.sub(r"^\s*nghĩa( tiếng Việt)?\s*[:：]\s*", "", clean(vietnamese), flags=re.I)
     return {"zh": chinese, "vi": vietnamese} if HAN.search(chinese) else None
 
 

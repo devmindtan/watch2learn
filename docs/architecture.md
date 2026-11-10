@@ -119,7 +119,8 @@ that sentence; other readings stay available as `alternatives`.
   from the recognised words, not from pitch analysis. Best/last scores are kept
   for saved items.
 - Lessons are Vietnamese. "Xem chi tiết" shows every part to read; "Nghe giảng"
-  speaks only the important parts, briefly. Word: reading, meaning (with the sense
+  is one flowing talk about use only (how it is used, where, a note if any, one
+  example): reading and meaning are on screen and are never read out. Word: reading, meaning (with the sense
   used in this sentence), pronunciation notes, where/how it is used, how native
   speakers say it (examples), and a special note only when there is one. Sentence:
   reading, meaning word by word, pronunciation notes, structure, when it is said,

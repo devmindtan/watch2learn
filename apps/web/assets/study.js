@@ -268,8 +268,9 @@ async function streamEvents(path, body, onEvent) {
 }
 
 /**
- * A lesson panel. "Xem chi tiết" shows every section to read; "Nghe giảng" speaks
- * only the important parts, briefly. `plan` lists the sections in order; each has
+ * A lesson panel. "Xem chi tiết" shows every section to read; "Nghe giảng" is one
+ * flowing talk about use only (how and where it is used, an example, a note if
+ * any) — reading and meaning are on screen and are not read out. `plan` lists the sections in order; each has
  * a title and either fixed content from verified data (`build(facts)` returns
  * [lines, speech] — empty speech means "shown, not spoken"), `ai: key` filled by
  * the local model (spoken after `say`), or `examples` (only the first is spoken).
@@ -324,7 +325,7 @@ export function lessonPanel(box, ctx, { title, request, plan, speakIt }) {
   };
   const controls = element("div", "action-row");
   controls.append(
-    actionButton("lesson", "🗣", "Nghe giảng", startSpeaking, { title: "Nghe phần quan trọng, ngắn gọn" }),
+    actionButton("lesson", "🗣", "Nghe giảng", startSpeaking, { title: "Nghe giảng cách dùng, liền mạch và ngắn gọn" }),
     actionButton("plain", "⏹", "Dừng", () => stopSpeaking()),
     actionButton("plain", "↻", "Soạn lại", () => {
       if (window.confirm("Nhờ AI soạn lại bài giảng này? Bản cũ sẽ bị thay thế.")) {
@@ -342,7 +343,7 @@ export function lessonPanel(box, ctx, { title, request, plan, speakIt }) {
       plan.forEach((item, index) => item.build && fill(sections[index], ...item.build(event.facts)));
     } else if (event.type === "section") {
       const item = sections.find((candidate) => candidate.ai === event.key);
-      if (item) fill(item, [event.text], [...intro(item), { text: event.text, lang: "vi" }]);
+      if (item) fill(item, [event.text], [...intro(item), { text: event.text }]);
     } else if (event.type === "example") {
       const item = sections.find((candidate) => candidate.examples);
       if (!item) return true;
@@ -383,28 +384,24 @@ export function explainWord(box, ctx, word, occurrence, cue, inContext, { speakI
         build: (facts) => {
           const lines = [`${surface} đọc là ${facts.syllables.map((item) => item.pinyin).join(" ")}.`];
           facts.syllables.forEach((item) => lines.push(`${item.character} (${item.pinyin}): ${toneDescription(item.pinyin)}.`));
-          return [lines, [{ text: "Từ", lang: "vi" }, { text: surface, lang: "zh", rate: 0.8 }, { text: "đọc chậm là", lang: "vi" }, { text: surface, lang: "zh", rate: 0.55 }]];
+          return [lines, []];
         },
       },
       {
         title: "Nghĩa",
         build: () => {
           const lines = [];
-          const speech = [];
-          if (meaning) {
-            lines.push(`Nghĩa: ${meaning}.`);
-            speech.push({ text: `nghĩa là ${inContext?.text || meaning}.`, lang: "vi" });
-          }
+          if (meaning) lines.push(`Nghĩa: ${meaning}.`);
           if (inContext) lines.push(`Trong câu này: ${inContext.text}.`);
           lines.push(chinese("p", "lesson-zh", occurrence.cue_text));
           if (cue?.translation_vi) lines.push(`→ ${cue.translation_vi}`);
-          return [lines, speech];
+          return [lines, []];
         },
       },
       { title: "Lưu ý khi phát âm", build: tipsSection("Từ này") },
-      { title: "Dùng ở đâu, như thế nào", ai: "cach_dung", say: "Cách dùng:" },
-      { title: "Người bản xứ nói thế nào", examples: true, say: "Người bản xứ hay nói:" },
-      { title: "Lưu ý đặc biệt", ai: "luu_y", say: "Lưu ý:", optional: true },
+      { title: "Dùng thế nào, ở đâu", ai: "cach_dung" },
+      { title: "Người bản xứ nói thế nào", examples: true, say: "Chẳng hạn, người bản xứ hay nói," },
+      { title: "Lưu ý", ai: "luu_y", optional: true },
     ],
   });
 }
@@ -426,20 +423,20 @@ export function explainSentence(box, ctx, cueIndex, { speakIt }) {
         title: "Đọc thế nào",
         build: (facts) => [
           [chinese("p", "lesson-zh", chineseText(cue)), facts.syllables.map((item) => item.pinyin).join(" ")],
-          [{ text: "Câu này đọc là", lang: "vi" }, { text: chineseText(cue), lang: "zh", rate: 0.8 }],
+          [],
         ],
       },
       {
         title: "Nghĩa",
         build: () => [
           [...(cue.translation_vi ? [`Nghĩa: ${cue.translation_vi}`] : []), ...glossary.map((item) => `${item.text} (${item.pinyin || ""}): ${item.meaning}`)],
-          cue.translation_vi ? [{ text: `nghĩa là: ${cue.translation_vi}`, lang: "vi" }] : [],
+          [],
         ],
       },
       { title: "Lưu ý khi phát âm", build: tipsSection("Câu này") },
-      { title: "Cấu trúc câu", ai: "cau_truc", say: "Cấu trúc:" },
-      { title: "Thường nói khi nào", ai: "giao_tiep", say: "Thường nói khi" },
-      { title: "Câu tương tự", examples: true, say: "Ví dụ:" },
+      { title: "Thường nói khi nào, ở đâu", ai: "giao_tiep" },
+      { title: "Cấu trúc câu", ai: "cau_truc" },
+      { title: "Câu tương tự", examples: true, say: "Một câu tương tự là," },
     ],
   });
 }
